@@ -1,6 +1,6 @@
 # مدير المحفظة الاستثمارية الديناميكي
 
-تطبيق جوال (iOS/Android) لإدارة المحفظة الاستثمارية الشخصية باستخدام نموذج **Optimum Score (OS)** الرياضي.
+تطبيق متعدد المنصات (iOS / Android / Windows / macOS / Linux) لإدارة المحفظة الاستثمارية الشخصية باستخدام نموذج **Optimum Score (OS)** الرياضي.
 
 ## نظرة عامة
 
@@ -78,19 +78,36 @@ portfolio_app/
 
 ## التقنيات
 
-- **Flutter** - تطوير مزدوج iOS/Android
+- **Flutter** - تطوير متعدد المنصات (جوال + سطح المكتب)
 - **Riverpod** - إدارة الحالة
-- **SQLite** - قاعدة بيانات محلية
+- **SQLite** (sqflite_common_ffi) - قاعدة بيانات محلية (تعمل على جميع المنصات)
+- **window_manager** - إدارة نافذة سطح المكتب
 - **fl_chart** - رسوم بيانية
 - **pdf** - تصدير PDF
 - **واجهة عربية RTL** بالكامل
+- **تخطيط متجاوب** - شريط جانبي على سطح المكتب، شريط سفلي على الجوال
 
 ## التشغيل
 
+### على الجوال (Android/iOS)
 ```bash
 cd portfolio_app
 flutter pub get
 flutter run
+```
+
+### على Windows (سطح المكتب)
+```bash
+cd portfolio_app
+flutter pub get
+flutter run -d windows
+```
+
+### على macOS
+```bash
+cd portfolio_app
+flutter pub get
+flutter run -d macos
 ```
 
 ## اختبار الخوارزميات

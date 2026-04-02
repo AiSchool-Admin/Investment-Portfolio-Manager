@@ -4,7 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../providers/portfolio_provider.dart';
 import '../services/export_service.dart';
 
-/// لوحة التحكم الرئيسية
+/// لوحة التحكم الرئيسية - تخطيط متجاوب
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
@@ -80,54 +80,222 @@ class DashboardScreen extends ConsumerWidget {
           final plPercent =
               totalPurchase > 0 ? (totalPL / totalPurchase) * 100 : 0.0;
 
-          return RefreshIndicator(
-            onRefresh: () async =>
-                ref.read(signalsProvider.notifier).analyzeAll(),
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                // بطاقة القيمة الإجمالية
-                _buildSummaryCard(context, totalValue, totalPL, plPercent,
-                    profile?.availableCash ?? 0),
-                const SizedBox(height: 16),
+          final width = MediaQuery.of(context).size.width;
+          final isWide = width >= 800;
 
-                // رسم بياني للتوزيع
-                if (assets.length > 1)
-                  _buildPieChart(context, assets, totalValue),
-                const SizedBox(height: 16),
+          if (isWide) {
+            return _buildDesktopDashboard(
+              context, ref, assets, totalValue, totalPL, plPercent,
+              profile?.availableCash ?? 0, activeSignals, rebalancing,
+            );
+          }
 
-                // الإشارات النشطة
-                if (activeSignals.isNotEmpty) ...[
-                  _buildSectionTitle(context, 'الإشارات النشطة',
-                      badge: activeSignals.length),
-                  const SizedBox(height: 8),
-                  ...activeSignals.map(
-                      (s) => _buildSignalCard(context, s)),
-                  const SizedBox(height: 16),
-                ],
-
-                // تنبيهات إعادة التوازن
-                if (rebalancing.isNotEmpty) ...[
-                  _buildSectionTitle(context, 'إعادة التوازن المطلوبة',
-                      badge: rebalancing.length),
-                  const SizedBox(height: 8),
-                  ...rebalancing.map(
-                      (r) => _buildRebalanceCard(context, r)),
-                  const SizedBox(height: 16),
-                ],
-
-                // ملخص الأصول
-                _buildSectionTitle(context, 'ملخص الأصول'),
-                const SizedBox(height: 8),
-                ...assets.map((a) =>
-                    _buildAssetSummaryCard(context, a, totalValue)),
-              ],
-            ),
+          return _buildMobileDashboard(
+            context, ref, assets, totalValue, totalPL, plPercent,
+            profile?.availableCash ?? 0, activeSignals, rebalancing,
           );
         },
       ),
     );
   }
+
+  /// تخطيط سطح المكتب: عمودين متجاورين
+  Widget _buildDesktopDashboard(
+    BuildContext context,
+    WidgetRef ref,
+    List assets,
+    double totalValue,
+    double totalPL,
+    double plPercent,
+    double cash,
+    List activeSignals,
+    List rebalancing,
+  ) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // الصف الأول: ملخص + رسم بياني
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 3,
+                child: _buildSummaryCard(
+                    context, totalValue, totalPL, plPercent, cash),
+              ),
+              const SizedBox(width: 16),
+              if (assets.length > 1)
+                Expanded(
+                  flex: 2,
+                  child: _buildPieChart(context, assets, totalValue),
+                ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // الصف الثاني: إشارات + إعادة توازن
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // الإشارات النشطة
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildSectionTitle(context, 'الإشارات النشطة',
+                        badge: activeSignals.length),
+                    const SizedBox(height: 8),
+                    if (activeSignals.isEmpty)
+                      const Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(child: Text('لا توجد إشارات نشطة')),
+                        ),
+                      )
+                    else
+                      ...activeSignals
+                          .map((s) => _buildSignalCard(context, s)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              // إعادة التوازن
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildSectionTitle(context, 'إعادة التوازن',
+                        badge: rebalancing.length),
+                    const SizedBox(height: 8),
+                    if (rebalancing.isEmpty)
+                      const Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(child: Text('جميع الأوزان متوازنة')),
+                        ),
+                      )
+                    else
+                      ...rebalancing
+                          .map((r) => _buildRebalanceCard(context, r)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // الصف الثالث: ملخص الأصول (جدول على سطح المكتب)
+          _buildSectionTitle(context, 'ملخص الأصول'),
+          const SizedBox(height: 8),
+          _buildAssetsTable(context, assets, totalValue),
+        ],
+      ),
+    );
+  }
+
+  /// جدول الأصول (لسطح المكتب)
+  Widget _buildAssetsTable(
+      BuildContext context, List assets, double totalValue) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Table(
+          columnWidths: const {
+            0: FlexColumnWidth(2),
+            1: FlexColumnWidth(1.5),
+            2: FlexColumnWidth(1.5),
+            3: FlexColumnWidth(1.5),
+            4: FlexColumnWidth(1.5),
+            5: FlexColumnWidth(1),
+          },
+          children: [
+            TableRow(
+              decoration: BoxDecoration(
+                border: Border(
+                    bottom: BorderSide(color: Colors.grey[300]!)),
+              ),
+              children: const [
+                _TableHeader('الأصل'),
+                _TableHeader('الفئة'),
+                _TableHeader('السعر الحالي'),
+                _TableHeader('القيمة'),
+                _TableHeader('الربح/الخسارة'),
+                _TableHeader('الوزن'),
+              ],
+            ),
+            ...assets.map((a) {
+              final weight =
+                  totalValue > 0 ? (a.currentValue / totalValue) : 0.0;
+              final isPositive = a.profitLoss >= 0;
+              return TableRow(
+                children: [
+                  _TableCell(a.name, bold: true),
+                  _TableCell(a.category),
+                  _TableCell('\$${a.currentPrice.toStringAsFixed(2)}'),
+                  _TableCell('\$${a.currentValue.toStringAsFixed(2)}'),
+                  _TableCell(
+                    '${isPositive ? '+' : ''}${a.profitLossPercent.toStringAsFixed(1)}%',
+                    color: isPositive ? Colors.green : Colors.red,
+                  ),
+                  _TableCell('${(weight * 100).toStringAsFixed(1)}%'),
+                ],
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// تخطيط الجوال: قائمة عمودية
+  Widget _buildMobileDashboard(
+    BuildContext context,
+    WidgetRef ref,
+    List assets,
+    double totalValue,
+    double totalPL,
+    double plPercent,
+    double cash,
+    List activeSignals,
+    List rebalancing,
+  ) {
+    return RefreshIndicator(
+      onRefresh: () async =>
+          ref.read(signalsProvider.notifier).analyzeAll(),
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _buildSummaryCard(context, totalValue, totalPL, plPercent, cash),
+          const SizedBox(height: 16),
+          if (assets.length > 1)
+            _buildPieChart(context, assets, totalValue),
+          const SizedBox(height: 16),
+          if (activeSignals.isNotEmpty) ...[
+            _buildSectionTitle(context, 'الإشارات النشطة',
+                badge: activeSignals.length),
+            const SizedBox(height: 8),
+            ...activeSignals.map((s) => _buildSignalCard(context, s)),
+            const SizedBox(height: 16),
+          ],
+          if (rebalancing.isNotEmpty) ...[
+            _buildSectionTitle(context, 'إعادة التوازن المطلوبة',
+                badge: rebalancing.length),
+            const SizedBox(height: 8),
+            ...rebalancing.map((r) => _buildRebalanceCard(context, r)),
+            const SizedBox(height: 16),
+          ],
+          _buildSectionTitle(context, 'ملخص الأصول'),
+          const SizedBox(height: 8),
+          ...assets
+              .map((a) => _buildAssetSummaryCard(context, a, totalValue)),
+        ],
+      ),
+    );
+  }
+
+  // ===================== مكونات مشتركة =====================
 
   Widget _buildSummaryCard(BuildContext context, double totalValue,
       double totalPL, double plPercent, double cash) {
@@ -185,16 +353,9 @@ class DashboardScreen extends ConsumerWidget {
     if (totalValue <= 0) return const SizedBox.shrink();
 
     final colors = [
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.purple,
-      Colors.red,
-      Colors.teal,
-      Colors.amber,
-      Colors.indigo,
-      Colors.pink,
-      Colors.cyan,
+      Colors.blue, Colors.green, Colors.orange, Colors.purple,
+      Colors.red, Colors.teal, Colors.amber, Colors.indigo,
+      Colors.pink, Colors.cyan,
     ];
 
     return Card(
@@ -241,8 +402,7 @@ class DashboardScreen extends ConsumerWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 12,
-                      height: 12,
+                      width: 12, height: 12,
                       decoration: BoxDecoration(
                         color: colors[i % colors.length],
                         shape: BoxShape.circle,
@@ -264,9 +424,9 @@ class DashboardScreen extends ConsumerWidget {
     return Row(
       children: [
         Text(title,
-            style: const TextStyle(
-                fontSize: 18, fontWeight: FontWeight.bold)),
-        if (badge != null) ...[
+            style:
+                const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        if (badge != null && badge > 0) ...[
           const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -370,4 +530,38 @@ class DashboardScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// عنوان خلية الجدول
+class _TableHeader extends StatelessWidget {
+  final String text;
+  const _TableHeader(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        child: Text(text,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+      );
+}
+
+/// خلية الجدول
+class _TableCell extends StatelessWidget {
+  final String text;
+  final bool bold;
+  final Color? color;
+  const _TableCell(this.text, {this.bold = false, this.color});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+            color: color,
+            fontSize: 13,
+          ),
+        ),
+      );
 }

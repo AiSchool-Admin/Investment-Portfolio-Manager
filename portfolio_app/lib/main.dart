@@ -1,10 +1,42 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:window_manager/window_manager.dart';
 import 'screens/splash_screen.dart';
 
-void main() {
+/// هل نعمل على سطح المكتب؟
+bool get isDesktop =>
+    !kIsWeb &&
+    (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // تهيئة SQLite لسطح المكتب
+  if (isDesktop) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
+
+  // إعداد نافذة سطح المكتب
+  if (isDesktop) {
+    await windowManager.ensureInitialized();
+    const windowOptions = WindowOptions(
+      size: Size(1280, 800),
+      minimumSize: Size(900, 600),
+      center: true,
+      title: 'مدير المحفظة الاستثمارية',
+      titleBarStyle: TitleBarStyle.normal,
+    );
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
+
   runApp(const ProviderScope(child: PortfolioApp()));
 }
 
