@@ -1,0 +1,144 @@
+/**
+ * تخزين البيانات محلياً في المتصفح (localStorage)
+ * يعمل بدون إنترنت - جميع البيانات على جهازك
+ */
+
+import { Asset, InvestorProfile, Trade, PriceRecord } from './types';
+
+const KEYS = {
+  profile: 'portfolio_profile',
+  assets: 'portfolio_assets',
+  trades: 'portfolio_trades',
+  priceHistory: 'portfolio_prices',
+};
+
+// ============ الملف الاستثماري ============
+
+export function saveProfile(profile: InvestorProfile): void {
+  localStorage.setItem(KEYS.profile, JSON.stringify(profile));
+}
+
+export function getProfile(): InvestorProfile | null {
+  const data = localStorage.getItem(KEYS.profile);
+  return data ? JSON.parse(data) : null;
+}
+
+// ============ الأصول ============
+
+export function getAssets(): Asset[] {
+  const data = localStorage.getItem(KEYS.assets);
+  return data ? JSON.parse(data) : [];
+}
+
+export function saveAssets(assets: Asset[]): void {
+  localStorage.setItem(KEYS.assets, JSON.stringify(assets));
+}
+
+export function addAsset(asset: Asset): void {
+  const assets = getAssets();
+  assets.push({ ...asset, id: crypto.randomUUID() });
+  saveAssets(assets);
+}
+
+export function updateAsset(updated: Asset): void {
+  const assets = getAssets().map(a => a.id === updated.id ? updated : a);
+  saveAssets(assets);
+}
+
+export function deleteAsset(id: string): void {
+  saveAssets(getAssets().filter(a => a.id !== id));
+  // حذف الأسعار التاريخية المرتبطة
+  const all = getAllPriceHistory();
+  delete all[id];
+  localStorage.setItem(KEYS.priceHistory, JSON.stringify(all));
+}
+
+// ============ الأسعار التاريخية ============
+
+function getAllPriceHistory(): Record<string, PriceRecord[]> {
+  const data = localStorage.getItem(KEYS.priceHistory);
+  return data ? JSON.parse(data) : {};
+}
+
+export function getPriceHistory(assetId: string): PriceRecord[] {
+  return getAllPriceHistory()[assetId] || [];
+}
+
+export function getPriceList(assetId: string): number[] {
+  return getPriceHistory(assetId).map(p => p.close);
+}
+
+export function addPriceRecord(assetId: string, record: PriceRecord): void {
+  const all = getAllPriceHistory();
+  if (!all[assetId]) all[assetId] = [];
+  all[assetId].push(record);
+  all[assetId].sort((a, b) => a.date.localeCompare(b.date));
+  localStorage.setItem(KEYS.priceHistory, JSON.stringify(all));
+}
+
+export function setPriceHistory(assetId: string, records: PriceRecord[]): void {
+  const all = getAllPriceHistory();
+  all[assetId] = records.sort((a, b) => a.date.localeCompare(b.date));
+  localStorage.setItem(KEYS.priceHistory, JSON.stringify(all));
+}
+
+// ============ الصفقات ============
+
+export function getTrades(): Trade[] {
+  const data = localStorage.getItem(KEYS.trades);
+  return data ? JSON.parse(data) : [];
+}
+
+export function addTrade(trade: Omit<Trade, 'id'>): void {
+  const trades = getTrades();
+  trades.unshift({ ...trade, id: crypto.randomUUID() } as Trade);
+  localStorage.setItem(KEYS.trades, JSON.stringify(trades));
+}
+
+// ============ بيانات تجريبية ============
+
+export function loadSampleData(): void {
+  // ملف استثماري متوازن
+  saveProfile({
+    riskScore: 6, profileType: 'balanced',
+    stocksWeight: 0.35, cryptoWeight: 0.10, bondsWeight: 0.25,
+    commoditiesWeight: 0.10, realEstateWeight: 0.10, cashWeight: 0.10,
+    availableCash: 5000,
+  });
+
+  const aapl: Asset = {
+    id: 'aapl-1', name: 'AAPL', category: 'أسهم',
+    quantity: 10, purchasePrice: 150, purchaseDate: '2025-10-01',
+    currentPrice: 185, targetWeight: 0.30,
+  };
+  const btc: Asset = {
+    id: 'btc-1', name: 'BTC', category: 'عملات رقمية',
+    quantity: 0.1, purchasePrice: 45000, purchaseDate: '2025-09-15',
+    currentPrice: 52000, targetWeight: 0.20,
+  };
+  const msft: Asset = {
+    id: 'msft-1', name: 'MSFT', category: 'أسهم',
+    quantity: 8, purchasePrice: 380, purchaseDate: '2025-11-01',
+    currentPrice: 420, targetWeight: 0.25,
+  };
+  const gold: Asset = {
+    id: 'gold-1', name: 'GOLD', category: 'سلع',
+    quantity: 5, purchasePrice: 2000, purchaseDate: '2025-08-01',
+    currentPrice: 2350, targetWeight: 0.15,
+  };
+  saveAssets([aapl, btc, msft, gold]);
+
+  // أسعار تاريخية 60 يوم
+  const aaplPrices = [150,152.3,148.5,155.2,153.8,157.1,160.4,158.9,162,165.3,163.5,167.2,170.1,168.4,172.5,175,173.2,176.8,179.1,177.5,180.3,183,181.2,184.5,186,183.8,187.2,189.5,188,190.3,185.2,182,179.5,176,173.5,170,168.5,172,175.5,178,180.5,183,181.5,184,186.5,185,187.5,189,186.5,184,182,180,178.5,181,183.5,185,186.5,184.5,183,185];
+  const btcPrices = [45000,45500,44800,46200,47000,46500,48000,49200,48500,50000,51500,50800,52000,53500,52800,54000,55000,53500,52000,50500,49000,48000,47000,46500,48000,49500,51000,52500,54000,55500,54000,52500,51000,49500,48000,47000,46000,45500,47000,48500,50000,51500,53000,54500,53000,51500,50000,49000,50500,52000,53500,55000,54000,52500,51000,50000,51500,53000,52000,52000];
+  const msftPrices = [380,382,378,385,388,386,390,393,391,395,398,396,400,403,401,405,408,406,410,413,411,415,418,416,420,423,421,418,415,412,410,408,406,410,413,415,418,420,417,414,412,410,413,416,418,420,422,419,416,414,417,420,422,424,421,418,416,419,421,420];
+  const goldPrices = [2000,2010,2005,2020,2030,2025,2040,2055,2050,2070,2085,2080,2100,2115,2110,2130,2145,2140,2160,2175,2170,2190,2205,2200,2220,2235,2230,2250,2265,2260,2280,2295,2290,2310,2300,2285,2270,2260,2280,2300,2315,2330,2320,2310,2325,2340,2335,2350,2365,2355,2340,2330,2345,2360,2375,2365,2350,2345,2355,2350];
+
+  const makeRecords = (prices: number[]) =>
+    prices.map((p, i) => ({ date: `2026-${String(Math.floor(i/30)+1).padStart(2,'0')}-${String((i%30)+1).padStart(2,'0')}`, close: p }));
+
+  setPriceHistory('aapl-1', makeRecords(aaplPrices));
+  setPriceHistory('btc-1', makeRecords(btcPrices));
+  setPriceHistory('msft-1', makeRecords(msftPrices));
+  setPriceHistory('gold-1', makeRecords(goldPrices));
+}
