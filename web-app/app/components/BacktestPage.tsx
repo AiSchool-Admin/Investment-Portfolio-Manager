@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { runBacktest } from '../lib/engine';
 import { BacktestResult } from '../lib/types';
+import { getAssets, getPriceList } from '../lib/store';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 export default function BacktestPage() {
@@ -15,11 +16,11 @@ export default function BacktestPage() {
   const [gamma, setGamma] = useState('0.2');
   const [dataInfo, setDataInfo] = useState('');
 
-  // بيانات مثال
-  const runSample = () => {
+  const assets = getAssets();
+
+  const runBT = (prices: number[], label: string) => {
     setLoading(true);
-    const prices = generateSamplePrices();
-    setDataInfo(`بيانات مثال (AAPL - ${prices.length} يوم)`);
+    setDataInfo(`${label} (${prices.length} سجل)`);
     setTimeout(() => {
       const r = runBacktest(prices, parseFloat(capital) || 10000, 0.03, 0.001,
         parseInt(lookback) || 50, parseFloat(alpha) || 0.4, parseFloat(beta) || 0.4, parseFloat(gamma) || 0.2);
@@ -27,6 +28,19 @@ export default function BacktestPage() {
       setLoading(false);
     }, 100);
   };
+
+  // تشغيل باك تيست من بيانات أصل موجود
+  const runFromAsset = (assetId: string, assetName: string) => {
+    const prices = getPriceList(assetId);
+    if (prices.length < 10) {
+      alert(`${assetName}: لا توجد بيانات تاريخية كافية (${prices.length} سجل فقط). استورد CSV من صفحة الأصول أولاً.`);
+      return;
+    }
+    runBT(prices, assetName);
+  };
+
+  // بيانات مثال
+  const runSample = () => runBT(generateSamplePrices(), 'بيانات مثال (AAPL - 180 يوم)');
 
   // استيراد CSV
   const importCSV = () => {
@@ -104,8 +118,31 @@ export default function BacktestPage() {
             <input className="input" type="number" step="0.1" value={gamma} onChange={e => setGamma(e.target.value)} />
           </div>
         </div>
+        {/* أصول محفوظة */}
+        {assets.length > 0 && (
+          <div className="mb-3">
+            <label className="text-xs font-bold block mb-2">اختبار من أصل محفوظ (بيانات مربوطة):</label>
+            <div className="flex flex-wrap gap-2">
+              {assets.map(a => {
+                const count = getPriceList(a.id).length;
+                return (
+                  <button
+                    key={a.id}
+                    className={`px-3 py-2 rounded-lg text-sm border-2 cursor-pointer transition-all ${count >= 10 ? 'border-green-300 hover:bg-green-50' : 'border-gray-200 opacity-50'}`}
+                    onClick={() => runFromAsset(a.id, a.name)}
+                    disabled={loading || count < 10}
+                  >
+                    {a.name} ({count} سجل)
+                    {count < 10 && <span className="text-red-400 mr-1">⚠</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-3">
-          <button className="btn-primary flex-1" onClick={importCSV} disabled={loading}>📁 استيراد CSV</button>
+          <button className="btn-primary flex-1" onClick={importCSV} disabled={loading}>📁 استيراد CSV (ملف خارجي)</button>
           <button className="btn-outline flex-1" onClick={runSample} disabled={loading}>▶ بيانات مثال</button>
         </div>
       </div>

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Asset, CATEGORY_OPTIONS } from '../lib/types';
-import { getAssets, addAsset, updateAsset, deleteAsset, addPriceRecord } from '../lib/store';
+import { getAssets, addAsset, updateAsset, deleteAsset, addPriceRecord, setPriceHistory, getPriceHistory } from '../lib/store';
 
 export default function AssetsPage({ onRefresh }: { onRefresh: () => void }) {
   const [assets, setAssets] = useState(getAssets);
@@ -40,6 +40,7 @@ export default function AssetsPage({ onRefresh }: { onRefresh: () => void }) {
               addPriceRecord(a.id, { date: new Date().toISOString().split('T')[0], close: price });
               reload();
             }}
+            onReload={reload}
           />
         ))
       )}
@@ -54,17 +55,72 @@ export default function AssetsPage({ onRefresh }: { onRefresh: () => void }) {
   );
 }
 
-function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete, onPriceUpdate }: {
+function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete, onPriceUpdate, onReload }: {
   asset: Asset; totalValue: number; isEditing: boolean;
   onEdit: () => void; onUpdate: (a: Asset) => void;
   onDelete: () => void; onPriceUpdate: (price: number) => void;
+  onReload: () => void;
 }) {
   const [newPrice, setNewPrice] = useState('');
+  const [csvStatus, setCsvStatus] = useState('');
   const val = a.quantity * a.currentPrice;
   const pl = val - a.quantity * a.purchasePrice;
   const plPct = a.purchasePrice > 0 ? ((a.currentPrice - a.purchasePrice) / a.purchasePrice) * 100 : 0;
   const weight = totalValue > 0 ? (val / totalValue) * 100 : 0;
   const isPos = pl >= 0;
+
+  // عدد السجلات التاريخية المحفوظة
+  const historyCount = getPriceHistory(a.id).length;
+
+  // استيراد CSV للأسعار التاريخية
+  const importCSV = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      const lines = text.trim().split('\n');
+      const records: { date: string; close: number }[] = [];
+
+      // تحديد أعمدة CSV
+      const header = lines[0].toLowerCase().split(',');
+      let dateCol = header.indexOf('date');
+      let closeCol = header.indexOf('close');
+      if (dateCol === -1) dateCol = 0;
+      if (closeCol === -1) closeCol = header.length > 4 ? 4 : 1;
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',');
+        if (cols.length <= closeCol) continue;
+        const date = cols[dateCol]?.trim();
+        const price = parseFloat(cols[closeCol]);
+        if (date && !isNaN(price) && price > 0) {
+          records.push({ date, close: price });
+        }
+      }
+
+      if (records.length === 0) {
+        setCsvStatus('لم يتم العثور على بيانات صالحة في الملف');
+        return;
+      }
+
+      // حفظ البيانات مربوطة بالأصل
+      setPriceHistory(a.id, records);
+
+      // تحديث السعر الحالي بآخر سعر في الملف
+      const lastPrice = records[records.length - 1].close;
+      updateAsset({ ...a, currentPrice: lastPrice });
+
+      setCsvStatus(`تم استيراد ${records.length} سجل بنجاح ✓`);
+      onReload();
+
+      // مسح الرسالة بعد 3 ثواني
+      setTimeout(() => setCsvStatus(''), 3000);
+    };
+    input.click();
+  };
 
   return (
     <div className="card mb-3">
@@ -96,6 +152,26 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
             <div>الوزن المستهدف: <b>{(a.targetWeight * 100).toFixed(0)}%</b></div>
           </div>
 
+          {/* البيانات التاريخية */}
+          <div className="mb-3 p-3 rounded-lg" style={{ background: historyCount >= 50 ? 'var(--primary-bg)' : 'var(--warning-bg)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm">
+                <b>البيانات التاريخية:</b> {historyCount} سجل
+                {historyCount < 50 && <span className="text-orange-600 mr-1"> (يحتاج 50 على الأقل للإشارات)</span>}
+                {historyCount >= 50 && <span className="text-green-600 mr-1"> ✓ كافية للإشارات</span>}
+              </div>
+            </div>
+            <button className="btn-outline text-sm w-full" onClick={importCSV}>
+              📁 استيراد أسعار تاريخية (CSV)
+            </button>
+            {csvStatus && (
+              <div className={`text-xs mt-2 text-center font-bold ${csvStatus.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>
+                {csvStatus}
+              </div>
+            )}
+          </div>
+
+          {/* تحديث السعر */}
           <div className="flex gap-2 mb-3">
             <input className="input flex-1" type="number" placeholder="السعر الجديد" value={newPrice}
               onChange={e => setNewPrice(e.target.value)} />
@@ -153,7 +229,7 @@ function AddAssetModal({ onClose, onAdd }: { onClose: () => void; onAdd: (a: Ass
               onChange={e => setForm({ ...form, quantity: e.target.value })} />
           </div>
           <div>
-            <label className="text-sm font-bold">سعر الشراء ($)</label>
+            <label className="text-sm font-bold">سعر الشراء</label>
             <input className="input" type="number" placeholder="150.00" value={form.price}
               onChange={e => setForm({ ...form, price: e.target.value })} />
           </div>
