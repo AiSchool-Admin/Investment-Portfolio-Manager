@@ -3,7 +3,7 @@
 export interface Asset {
   id: string;
   name: string;
-  category: string; // أسهم، عملات رقمية، سندات، سلع، عقارات
+  category: string; // فئة الأصل (من CATEGORY_OPTIONS)
   quantity: number;
   purchasePrice: number;
   purchaseDate: string;
@@ -215,7 +215,115 @@ export const PROFILE_NAMES: Record<string, string> = {
   custom: 'مخصص',
 };
 
-export const CATEGORY_OPTIONS = ['أسهم', 'عملات رقمية', 'سندات', 'سلع', 'عقارات'];
+export const CATEGORY_OPTIONS = [
+  // أسهم
+  'أسهم محلية',
+  'أسهم أمريكية',
+  'أسهم أوروبية',
+  'أسهم أسواق ناشئة',
+  'أسهم آسيوية',
+  // صناديق الأسهم
+  'صناديق أسهم (ETF)',
+  'صناديق مؤشرات',
+  // الدخل الثابت والسندات
+  'سندات حكومية',
+  'سندات شركات',
+  'صكوك إسلامية',
+  'صناديق دخل ثابت',
+  // صناديق النقد
+  'صناديق نقد',
+  'ودائع بنكية',
+  // المعادن الثمينة
+  'ذهب',
+  'فضة',
+  'بلاتين',
+  // السلع
+  'نفط وطاقة',
+  'سلع زراعية',
+  'سلع صناعية',
+  // العقارات
+  'عقارات سكنية',
+  'عقارات تجارية',
+  'صناديق عقارية (REITs)',
+  // العملات الرقمية
+  'بيتكوين',
+  'إيثريوم',
+  'عملات رقمية أخرى',
+  'عملات مستقرة (Stablecoins)',
+  // صناديق متنوعة
+  'صناديق متوازنة',
+  'صناديق تحوط',
+  'أسهم خاصة (Private Equity)',
+  // أخرى
+  'فوركس (عملات أجنبية)',
+  'خيارات ومشتقات',
+  'أخرى',
+];
+
+// تجميع الفئات مع ألوان لكل مجموعة
+export const CATEGORY_GROUPS: Record<string, { label: string; color: string; categories: string[] }> = {
+  stocks: {
+    label: 'الأسهم',
+    color: '#2196F3',
+    categories: ['أسهم محلية', 'أسهم أمريكية', 'أسهم أوروبية', 'أسهم أسواق ناشئة', 'أسهم آسيوية', 'صناديق أسهم (ETF)', 'صناديق مؤشرات'],
+  },
+  fixedIncome: {
+    label: 'الدخل الثابت',
+    color: '#4CAF50',
+    categories: ['سندات حكومية', 'سندات شركات', 'صكوك إسلامية', 'صناديق دخل ثابت'],
+  },
+  cash: {
+    label: 'النقد وما يعادله',
+    color: '#607D8B',
+    categories: ['صناديق نقد', 'ودائع بنكية'],
+  },
+  preciousMetals: {
+    label: 'المعادن الثمينة',
+    color: '#FFC107',
+    categories: ['ذهب', 'فضة', 'بلاتين'],
+  },
+  commodities: {
+    label: 'السلع',
+    color: '#FF9800',
+    categories: ['نفط وطاقة', 'سلع زراعية', 'سلع صناعية'],
+  },
+  realEstate: {
+    label: 'العقارات',
+    color: '#9C27B0',
+    categories: ['عقارات سكنية', 'عقارات تجارية', 'صناديق عقارية (REITs)'],
+  },
+  crypto: {
+    label: 'العملات الرقمية',
+    color: '#FF5722',
+    categories: ['بيتكوين', 'إيثريوم', 'عملات رقمية أخرى', 'عملات مستقرة (Stablecoins)'],
+  },
+  funds: {
+    label: 'صناديق متنوعة',
+    color: '#3F51B5',
+    categories: ['صناديق متوازنة', 'صناديق تحوط', 'أسهم خاصة (Private Equity)'],
+  },
+  other: {
+    label: 'أخرى',
+    color: '#795548',
+    categories: ['فوركس (عملات أجنبية)', 'خيارات ومشتقات', 'أخرى'],
+  },
+};
+
+// استخراج لون الفئة
+export function getCategoryColor(category: string): string {
+  for (const group of Object.values(CATEGORY_GROUPS)) {
+    if (group.categories.includes(category)) return group.color;
+  }
+  return '#9E9E9E';
+}
+
+// استخراج اسم المجموعة الأم
+export function getCategoryGroupLabel(category: string): string {
+  for (const group of Object.values(CATEGORY_GROUPS)) {
+    if (group.categories.includes(category)) return group.label;
+  }
+  return 'أخرى';
+}
 
 // ============ بناء المركز (Position Building) ============
 

@@ -241,22 +241,22 @@ export function loadSampleData(): void {
   if (existingAssets.length > 0) return; // ← أصول موجودة، لا تُستبدل
 
   const aapl: Asset = {
-    id: 'aapl-1', name: 'AAPL', category: 'أسهم',
+    id: 'aapl-1', name: 'AAPL', category: 'أسهم أمريكية',
     quantity: 10, purchasePrice: 150, purchaseDate: '2025-10-01',
     currentPrice: 185, targetWeight: 0.30,
   };
   const btc: Asset = {
-    id: 'btc-1', name: 'BTC', category: 'عملات رقمية',
+    id: 'btc-1', name: 'BTC', category: 'بيتكوين',
     quantity: 0.1, purchasePrice: 45000, purchaseDate: '2025-09-15',
     currentPrice: 52000, targetWeight: 0.20,
   };
   const msft: Asset = {
-    id: 'msft-1', name: 'MSFT', category: 'أسهم',
+    id: 'msft-1', name: 'MSFT', category: 'أسهم أمريكية',
     quantity: 8, purchasePrice: 380, purchaseDate: '2025-11-01',
     currentPrice: 420, targetWeight: 0.25,
   };
   const gold: Asset = {
-    id: 'gold-1', name: 'GOLD', category: 'سلع',
+    id: 'gold-1', name: 'GOLD', category: 'ذهب',
     quantity: 5, purchasePrice: 2000, purchaseDate: '2025-08-01',
     currentPrice: 2350, targetWeight: 0.15,
   };

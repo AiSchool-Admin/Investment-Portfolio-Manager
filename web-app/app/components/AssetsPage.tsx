@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Asset, CATEGORY_OPTIONS } from '../lib/types';
+import { Asset, CATEGORY_GROUPS, getCategoryColor } from '../lib/types';
 import { getAssets, addAsset, updateAsset, deleteAsset, addPriceRecord, setPriceHistory, getPriceHistory } from '../lib/store';
 
 export default function AssetsPage({ onRefresh }: { onRefresh: () => void }) {
@@ -126,7 +126,7 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
     <div className="card mb-3">
       <div className="flex items-center gap-3 cursor-pointer" onClick={onEdit}>
         <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm"
-          style={{ background: a.category === 'أسهم' ? '#2196F3' : a.category === 'عملات رقمية' ? '#FF9800' : a.category === 'سندات' ? '#4CAF50' : a.category === 'سلع' ? '#FFC107' : '#9C27B0' }}>
+          style={{ background: getCategoryColor(a.category) }}>
           {a.name.slice(0, 2)}
         </div>
         <div className="flex-1">
@@ -191,7 +191,7 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
 }
 
 function AddAssetModal({ onClose, onAdd }: { onClose: () => void; onAdd: (a: Asset) => void }) {
-  const [form, setForm] = useState({ name: '', category: 'أسهم', quantity: '', price: '', weight: '' });
+  const [form, setForm] = useState({ name: '', category: 'أسهم محلية', quantity: '', price: '', weight: '' });
 
   const handleSubmit = () => {
     if (!form.name || !form.quantity || !form.price) return alert('يرجى ملء جميع الحقول');
@@ -220,7 +220,11 @@ function AddAssetModal({ onClose, onAdd }: { onClose: () => void; onAdd: (a: Ass
           <div>
             <label className="text-sm font-bold">الفئة</label>
             <select className="input" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
-              {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+              {Object.values(CATEGORY_GROUPS).map(g => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.categories.map(c => <option key={c} value={c}>{c}</option>)}
+                </optgroup>
+              ))}
             </select>
           </div>
           <div>

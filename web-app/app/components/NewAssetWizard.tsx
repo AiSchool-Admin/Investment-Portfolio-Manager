@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { CATEGORY_OPTIONS } from '../lib/types';
+import { CATEGORY_GROUPS } from '../lib/types';
 import { getProfile, getAssets, getSystemSettings, addAsset, addPlan, setPriceHistory } from '../lib/store';
 import {
   calculateHalfKellyPositionSize,
@@ -21,7 +21,7 @@ export default function NewAssetWizard({ onComplete, onCancel }: Props) {
 
   // الخطوة 1: بيانات الأصل
   const [assetName, setAssetName] = useState('');
-  const [assetCategory, setAssetCategory] = useState('أسهم');
+  const [assetCategory, setAssetCategory] = useState('أسهم محلية');
 
   // الخطوة 2: السعر والبيانات التاريخية
   const [currentPrice, setCurrentPrice] = useState('');
@@ -208,7 +208,11 @@ export default function NewAssetWizard({ onComplete, onCancel }: Props) {
               <div>
                 <label className="text-sm font-bold block mb-1">الفئة</label>
                 <select className="input" value={assetCategory} onChange={e => setAssetCategory(e.target.value)}>
-                  {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                  {Object.values(CATEGORY_GROUPS).map(g => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.categories.map(c => <option key={c} value={c}>{c}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
               </div>
             </div>
