@@ -3,7 +3,7 @@
  * يعمل بدون إنترنت - جميع البيانات على جهازك
  */
 
-import { Asset, InvestorProfile, Trade, PriceRecord, SystemSettings, AssetSettings, DEFAULT_SYSTEM_SETTINGS } from './types';
+import { Asset, InvestorProfile, Trade, PriceRecord, SystemSettings, AssetSettings, DEFAULT_SYSTEM_SETTINGS, PositionBuildingPlan, TrancheNotification } from './types';
 
 const KEYS = {
   profile: 'portfolio_profile',
@@ -12,6 +12,8 @@ const KEYS = {
   priceHistory: 'portfolio_prices',
   systemSettings: 'portfolio_system_settings',
   assetSettings: 'portfolio_asset_settings',
+  plans: 'portfolio_plans',
+  notifications: 'portfolio_notifications',
 };
 
 // ============ الملف الاستثماري ============
@@ -158,6 +160,56 @@ export function getEffectiveSettings(assetId: string): SystemSettings {
     zScoreStrongBuy: asset.zScoreStrongBuy ?? sys.zScoreStrongBuy,
     zScoreStrongSell: asset.zScoreStrongSell ?? sys.zScoreStrongSell,
   };
+}
+
+// ============ خطط بناء المراكز ============
+
+export function getPlans(): PositionBuildingPlan[] {
+  const data = localStorage.getItem(KEYS.plans);
+  return data ? JSON.parse(data) : [];
+}
+
+export function savePlans(plans: PositionBuildingPlan[]): void {
+  localStorage.setItem(KEYS.plans, JSON.stringify(plans));
+}
+
+export function addPlan(plan: PositionBuildingPlan): void {
+  const plans = getPlans();
+  plans.push(plan);
+  savePlans(plans);
+}
+
+export function updatePlan(updated: PositionBuildingPlan): void {
+  const plans = getPlans().map(p => p.id === updated.id ? updated : p);
+  savePlans(plans);
+}
+
+export function deletePlan(id: string): void {
+  savePlans(getPlans().filter(p => p.id !== id));
+}
+
+// ============ الإشعارات ============
+
+export function getNotifications(): TrancheNotification[] {
+  const data = localStorage.getItem(KEYS.notifications);
+  return data ? JSON.parse(data) : [];
+}
+
+export function addNotification(notif: TrancheNotification): void {
+  const all = getNotifications();
+  // تجنب التكرار
+  if (all.some(n => n.planId === notif.planId && n.trancheNumber === notif.trancheNumber && n.type === notif.type)) return;
+  all.unshift(notif);
+  localStorage.setItem(KEYS.notifications, JSON.stringify(all));
+}
+
+export function markNotificationRead(id: string): void {
+  const all = getNotifications().map(n => n.id === id ? { ...n, read: true } : n);
+  localStorage.setItem(KEYS.notifications, JSON.stringify(all));
+}
+
+export function clearNotifications(): void {
+  localStorage.removeItem(KEYS.notifications);
 }
 
 // ============ بيانات تجريبية ============

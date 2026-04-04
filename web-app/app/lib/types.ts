@@ -216,3 +216,47 @@ export const PROFILE_NAMES: Record<string, string> = {
 };
 
 export const CATEGORY_OPTIONS = ['أسهم', 'عملات رقمية', 'سندات', 'سلع', 'عقارات'];
+
+// ============ بناء المركز (Position Building) ============
+
+export interface Tranche {
+  id: string;
+  planId: string;
+  number: number;
+  value: number;          // قيمة الدفعة بالعملة
+  targetDate: string;     // ISO date string
+  minPrice: number | null; // سعر الشراء المستهدف (اختياري)
+  executed: boolean;
+  executedPrice: number | null;
+  executedDate: string | null;
+}
+
+export interface PositionBuildingPlan {
+  id: string;
+  assetName: string;
+  assetCategory: string;
+  assetId: string | null;  // مرتبط بأصل موجود إن وجد
+  totalTargetValue: number;
+  numTranches: number;
+  tranches: Tranche[];
+  strategy: 'DCA' | 'Pyramiding';
+  horizonDays: number;
+  currentPrice: number;
+  riskRewardRatio: number;
+  optimumScore: number;
+  createdAt: string;       // ISO date string
+  lastReview: string;      // ISO date string
+  status: 'active' | 'completed' | 'paused';
+}
+
+// إشعار بدفعة قادمة
+export interface TrancheNotification {
+  id: string;
+  planId: string;
+  trancheNumber: number;
+  assetName: string;
+  message: string;
+  type: 'upcoming_tranche' | 'price_target_reached';
+  date: string;
+  read: boolean;
+}
