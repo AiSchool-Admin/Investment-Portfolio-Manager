@@ -54,7 +54,7 @@ export default function AppShell() {
         {tab === 'builder' && <PositionBuilderPage key={refreshKey} onRefresh={refresh} />}
         {tab === 'signals' && <SignalsPage key={refreshKey} />}
         {tab === 'backtest' && <BacktestPage />}
-        {tab === 'settings' && <SettingsPage onProfileReset={() => window.location.reload()} />}
+        {tab === 'settings' && <SettingsPage />}
       </main>
 
       {/* شريط التنقل السفلي (جوال) */}

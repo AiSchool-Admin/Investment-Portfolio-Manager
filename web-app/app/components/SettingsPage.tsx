@@ -11,7 +11,7 @@ const SELL_MODES = [
   { value: 'all', label: 'كامل المركز' },
 ] as const;
 
-export default function SettingsPage({ onProfileReset }: { onProfileReset: () => void }) {
+export default function SettingsPage() {
   const [profile, setProfile] = useState(getProfile);
   const [cash, setCash] = useState(profile?.availableCash?.toString() || '0');
   const [settings, setSettings] = useState<SystemSettings>(getSystemSettings);
@@ -41,17 +41,6 @@ export default function SettingsPage({ onProfileReset }: { onProfileReset: () =>
       const updated = { ...profile, [key]: value, profileType: 'custom' as const };
       saveProfile(updated);
       setProfile(updated);
-    }
-  };
-
-  const resetProfile = () => {
-    if (confirm('هل تريد إعادة تعيين الملف الاستثماري؟ ستحتاج لإعادة الاستبيان.')) {
-      // مسح بيانات المحفظة فقط (وليس كل localStorage)
-      const portfolioKeys = Object.keys(localStorage).filter(k => k.startsWith('portfolio_'));
-      for (const key of portfolioKeys) {
-        localStorage.removeItem(key);
-      }
-      onProfileReset();
     }
   };
 
@@ -328,56 +317,101 @@ export default function SettingsPage({ onProfileReset }: { onProfileReset: () =>
       )}
 
       {/* ============ الملف الاستثماري ============ */}
-      {activeTab === 'profile' && (
+      {activeTab === 'profile' && profile && (
         <div>
+          {/* درجة المخاطر والنمط */}
           <div className="card mb-4">
-            <h2 className="font-bold text-lg mb-3">الملف الاستثماري</h2>
-            {profile ? (
-              <>
-                <div className="grid grid-cols-2 gap-2 text-sm mb-3">
-                  <div className="flex justify-between"><span>النمط:</span><b>{PROFILE_NAMES[profile.profileType]}</b></div>
-                  <div className="flex justify-between"><span>درجة المخاطر:</span><b>{profile.riskScore}/10</b></div>
-                </div>
+            <h2 className="font-bold text-lg mb-3">نمط الاستثمار</h2>
 
-                <div className="mb-4">
-                  <div className="text-sm font-bold mb-2">التوزيع المستهدف (قابل للتعديل):</div>
-                  {weights.map(w => (
-                    <div key={w.key} className="flex items-center gap-2 mb-2">
-                      <span className="w-24 text-sm">{w.label}</span>
-                      <input
-                        type="range"
-                        className="flex-1 accent-[#1B5E20]"
-                        min="0" max="100" step="1"
-                        value={Math.round(w.value * 100)}
-                        onChange={e => updateProfileWeights(w.key, parseInt(e.target.value) / 100)}
-                      />
-                      <span className="text-sm font-bold w-12 text-left">{(w.value * 100).toFixed(0)}%</span>
-                    </div>
-                  ))}
-                  {weights.length > 0 && (
-                    <div className={`text-xs text-center font-bold mt-1 ${
-                      Math.abs(weights.reduce((s, w) => s + w.value, 0) - 1) < 0.01
-                        ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      المجموع: {(weights.reduce((s, w) => s + w.value, 0) * 100).toFixed(0)}%
-                      {Math.abs(weights.reduce((s, w) => s + w.value, 0) - 1) >= 0.01 && ' (يجب أن يكون 100%)'}
-                    </div>
-                  )}
-                </div>
+            <div className="mb-4">
+              <label className="text-sm font-bold block mb-2">درجة تحمل المخاطر: {profile.riskScore}/10</label>
+              <input
+                type="range"
+                className="w-full accent-[#1B5E20]"
+                min="1" max="10" step="1"
+                value={profile.riskScore}
+                onChange={e => {
+                  const score = parseInt(e.target.value);
+                  const type = score >= 8 ? 'aggressive' : score >= 5 ? 'balanced' : score >= 3 ? 'income' : 'capital_preservation';
+                  const updated = { ...profile, riskScore: score, profileType: type as typeof profile.profileType };
+                  saveProfile(updated);
+                  setProfile(updated);
+                }}
+              />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>1 - حذر جداً</span>
+                <span>10 - مغامر جداً</span>
+              </div>
+            </div>
 
-                <div className="flex gap-2 mb-3">
-                  <input className="input flex-1" type="number" value={cash} onChange={e => setCash(e.target.value)}
-                    placeholder="النقد المتاح" />
-                  <button className="btn-primary text-sm" onClick={updateCash}>تحديث النقد</button>
-                </div>
+            <div className="mb-3">
+              <label className="text-sm font-bold block mb-2">النمط الاستثماري</label>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(PROFILE_NAMES).map(([key, label]) => (
+                  <button
+                    key={key}
+                    className={`p-3 rounded-lg border-2 text-sm text-center cursor-pointer transition-all ${
+                      profile.profileType === key
+                        ? 'border-green-500 bg-green-50 font-bold'
+                        : 'border-gray-200 hover:bg-gray-50'
+                    }`}
+                    onClick={() => {
+                      const presets: Record<string, Partial<typeof profile>> = {
+                        aggressive: { stocksWeight: 0.50, cryptoWeight: 0.25, bondsWeight: 0.05, commoditiesWeight: 0.10, realEstateWeight: 0.05, cashWeight: 0.05, riskScore: 9 },
+                        balanced: { stocksWeight: 0.35, cryptoWeight: 0.10, bondsWeight: 0.25, commoditiesWeight: 0.10, realEstateWeight: 0.10, cashWeight: 0.10, riskScore: 6 },
+                        income: { stocksWeight: 0.20, cryptoWeight: 0.05, bondsWeight: 0.40, commoditiesWeight: 0.05, realEstateWeight: 0.15, cashWeight: 0.15, riskScore: 3 },
+                        capital_preservation: { stocksWeight: 0.10, cryptoWeight: 0.00, bondsWeight: 0.50, commoditiesWeight: 0.05, realEstateWeight: 0.10, cashWeight: 0.25, riskScore: 1 },
+                        custom: {},
+                      };
+                      const preset = presets[key] || {};
+                      const updated = { ...profile, ...preset, profileType: key as typeof profile.profileType };
+                      saveProfile(updated);
+                      setProfile(updated);
+                      showSaved();
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
 
-                <button className="btn-outline w-full text-sm" onClick={resetProfile}>
-                  إعادة تعيين الملف الاستثماري
-                </button>
-              </>
-            ) : (
-              <div className="text-gray-400">لم يتم إعداد الملف الاستثماري</div>
+          {/* التوزيع المستهدف */}
+          <div className="card mb-4">
+            <h2 className="font-bold text-lg mb-3">التوزيع المستهدف</h2>
+            {weights.map(w => (
+              <div key={w.key} className="flex items-center gap-2 mb-2">
+                <span className="w-24 text-sm">{w.label}</span>
+                <input
+                  type="range"
+                  className="flex-1 accent-[#1B5E20]"
+                  min="0" max="100" step="1"
+                  value={Math.round(w.value * 100)}
+                  onChange={e => updateProfileWeights(w.key, parseInt(e.target.value) / 100)}
+                />
+                <span className="text-sm font-bold w-12 text-left">{(w.value * 100).toFixed(0)}%</span>
+              </div>
+            ))}
+            {weights.length > 0 && (
+              <div className={`text-xs text-center font-bold mt-1 ${
+                Math.abs(weights.reduce((s, w) => s + w.value, 0) - 1) < 0.01
+                  ? 'text-green-600' : 'text-red-600'
+              }`}>
+                المجموع: {(weights.reduce((s, w) => s + w.value, 0) * 100).toFixed(0)}%
+                {Math.abs(weights.reduce((s, w) => s + w.value, 0) - 1) >= 0.01 && ' (يجب أن يكون 100%)'}
+              </div>
             )}
+          </div>
+
+          {/* النقد المتاح */}
+          <div className="card mb-4">
+            <h2 className="font-bold text-lg mb-3">النقد المتاح</h2>
+            <div className="flex gap-2">
+              <input className="input flex-1" type="number" value={cash} onChange={e => setCash(e.target.value)}
+                placeholder="النقد المتاح" />
+              <button className="btn-primary text-sm" onClick={updateCash}>تحديث</button>
+            </div>
           </div>
         </div>
       )}

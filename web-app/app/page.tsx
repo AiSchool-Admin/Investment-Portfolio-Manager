@@ -1,26 +1,32 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getProfile, isInitialized } from './lib/store';
-import Questionnaire from './components/Questionnaire';
+import { getProfile, saveProfile } from './lib/store';
 import AppShell from './components/AppShell';
 
 export default function Page() {
-  const [ready, setReady] = useState<'loading' | 'questionnaire' | 'app'>('loading');
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    try {
-      // التحقق من وجود الملف الاستثماري أو إتمام الإعداد سابقاً
-      const hasProfile = getProfile() !== null;
-      const wasInitialized = isInitialized();
-      setReady(hasProfile || wasInitialized ? 'app' : 'questionnaire');
-    } catch {
-      // في حال فشل localStorage
-      setReady('questionnaire');
+    // إذا لم يكن هناك ملف استثماري، ننشئ ملفاً افتراضياً (متوازن)
+    // لا نعرض أي استبيان - المستخدم يعدّل من الإعدادات
+    if (!getProfile()) {
+      saveProfile({
+        riskScore: 5,
+        profileType: 'balanced',
+        stocksWeight: 0.35,
+        cryptoWeight: 0.10,
+        bondsWeight: 0.25,
+        commoditiesWeight: 0.10,
+        realEstateWeight: 0.10,
+        cashWeight: 0.10,
+        availableCash: 10000,
+      });
     }
+    setReady(true);
   }, []);
 
-  if (ready === 'loading') {
+  if (!ready) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
@@ -32,10 +38,6 @@ export default function Page() {
         </div>
       </div>
     );
-  }
-
-  if (ready === 'questionnaire') {
-    return <Questionnaire onComplete={() => setReady('app')} />;
   }
 
   return <AppShell />;
