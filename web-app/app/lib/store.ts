@@ -3,13 +3,15 @@
  * يعمل بدون إنترنت - جميع البيانات على جهازك
  */
 
-import { Asset, InvestorProfile, Trade, PriceRecord } from './types';
+import { Asset, InvestorProfile, Trade, PriceRecord, SystemSettings, AssetSettings, DEFAULT_SYSTEM_SETTINGS } from './types';
 
 const KEYS = {
   profile: 'portfolio_profile',
   assets: 'portfolio_assets',
   trades: 'portfolio_trades',
   priceHistory: 'portfolio_prices',
+  systemSettings: 'portfolio_system_settings',
+  assetSettings: 'portfolio_asset_settings',
 };
 
 // ============ الملف الاستثماري ============
@@ -95,16 +97,81 @@ export function addTrade(trade: Omit<Trade, 'id'>): void {
   localStorage.setItem(KEYS.trades, JSON.stringify(trades));
 }
 
+// ============ إعدادات النظام ============
+
+export function getSystemSettings(): SystemSettings {
+  const data = localStorage.getItem(KEYS.systemSettings);
+  if (data) {
+    // دمج مع الافتراضية لضمان وجود أي إعدادات جديدة
+    return { ...DEFAULT_SYSTEM_SETTINGS, ...JSON.parse(data) };
+  }
+  return { ...DEFAULT_SYSTEM_SETTINGS };
+}
+
+export function saveSystemSettings(settings: SystemSettings): void {
+  localStorage.setItem(KEYS.systemSettings, JSON.stringify(settings));
+}
+
+export function resetSystemSettings(): void {
+  localStorage.removeItem(KEYS.systemSettings);
+}
+
+// ============ إعدادات الأصول الفردية ============
+
+export function getAllAssetSettings(): AssetSettings[] {
+  const data = localStorage.getItem(KEYS.assetSettings);
+  return data ? JSON.parse(data) : [];
+}
+
+export function getAssetSettings(assetId: string): AssetSettings | null {
+  const all = getAllAssetSettings();
+  return all.find(s => s.assetId === assetId) || null;
+}
+
+export function saveAssetSettings(settings: AssetSettings): void {
+  const all = getAllAssetSettings().filter(s => s.assetId !== settings.assetId);
+  all.push(settings);
+  localStorage.setItem(KEYS.assetSettings, JSON.stringify(all));
+}
+
+export function deleteAssetSettings(assetId: string): void {
+  const all = getAllAssetSettings().filter(s => s.assetId !== assetId);
+  localStorage.setItem(KEYS.assetSettings, JSON.stringify(all));
+}
+
+// دمج إعدادات النظام مع إعدادات الأصل (الأصل يتجاوز النظام)
+export function getEffectiveSettings(assetId: string): SystemSettings {
+  const sys = getSystemSettings();
+  const asset = getAssetSettings(assetId);
+  if (!asset) return sys;
+  return {
+    ...sys,
+    alpha: asset.alpha ?? sys.alpha,
+    beta: asset.beta ?? sys.beta,
+    gamma: asset.gamma ?? sys.gamma,
+    buyThreshold: asset.buyThreshold ?? sys.buyThreshold,
+    sellThreshold: asset.sellThreshold ?? sys.sellThreshold,
+    riskFreeRate: asset.riskFreeRate ?? sys.riskFreeRate,
+    transactionCost: asset.transactionCost ?? sys.transactionCost,
+    sellMode: asset.sellMode ?? sys.sellMode,
+    buyOrderCashRatio: asset.buyOrderCashRatio ?? sys.buyOrderCashRatio,
+    zScoreStrongBuy: asset.zScoreStrongBuy ?? sys.zScoreStrongBuy,
+    zScoreStrongSell: asset.zScoreStrongSell ?? sys.zScoreStrongSell,
+  };
+}
+
 // ============ بيانات تجريبية ============
 
 export function loadSampleData(): void {
-  // ملف استثماري متوازن
-  saveProfile({
-    riskScore: 6, profileType: 'balanced',
-    stocksWeight: 0.35, cryptoWeight: 0.10, bondsWeight: 0.25,
-    commoditiesWeight: 0.10, realEstateWeight: 0.10, cashWeight: 0.10,
-    availableCash: 5000,
-  });
+  // لا نكتب فوق الملف الاستثماري إذا كان موجوداً (يأتي من الاستبيان)
+  if (!getProfile()) {
+    saveProfile({
+      riskScore: 6, profileType: 'balanced',
+      stocksWeight: 0.35, cryptoWeight: 0.10, bondsWeight: 0.25,
+      commoditiesWeight: 0.10, realEstateWeight: 0.10, cashWeight: 0.10,
+      availableCash: 5000,
+    });
+  }
 
   const aapl: Asset = {
     id: 'aapl-1', name: 'AAPL', category: 'أسهم',

@@ -2,28 +2,26 @@
 
 import { useState } from 'react';
 import { runBacktest } from '../lib/engine';
-import { BacktestResult } from '../lib/types';
-import { getAssets, getPriceList } from '../lib/store';
+import { BacktestResult, SystemSettings } from '../lib/types';
+import { getAssets, getPriceList, getSystemSettings, getEffectiveSettings } from '../lib/store';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 export default function BacktestPage() {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [capital, setCapital] = useState('10000');
-  const [lookback, setLookback] = useState('50');
-  const [alpha, setAlpha] = useState('0.4');
-  const [beta, setBeta] = useState('0.4');
-  const [gamma, setGamma] = useState('0.2');
   const [dataInfo, setDataInfo] = useState('');
+  const [useAssetSettings, setUseAssetSettings] = useState(true);
 
   const assets = getAssets();
+  const systemSettings = getSystemSettings();
 
-  const runBT = (prices: number[], label: string) => {
+  const runBT = (prices: number[], label: string, settings: SystemSettings) => {
     setLoading(true);
     setDataInfo(`${label} (${prices.length} سجل)`);
     setTimeout(() => {
-      const r = runBacktest(prices, parseFloat(capital) || 10000, 0.03, 0.001,
-        parseInt(lookback) || 50, parseFloat(alpha) || 0.4, parseFloat(beta) || 0.4, parseFloat(gamma) || 0.2);
+      const settingsWithCapital = { ...settings };
+      const r = runBacktest(prices, parseFloat(capital) || 10000, settingsWithCapital);
       setResult(r);
       setLoading(false);
     }, 100);
@@ -36,11 +34,12 @@ export default function BacktestPage() {
       alert(`${assetName}: لا توجد بيانات تاريخية كافية (${prices.length} سجل فقط). استورد CSV من صفحة الأصول أولاً.`);
       return;
     }
-    runBT(prices, assetName);
+    const settings = useAssetSettings ? getEffectiveSettings(assetId) : systemSettings;
+    runBT(prices, assetName, settings);
   };
 
   // بيانات مثال
-  const runSample = () => runBT(generateSamplePrices(), 'بيانات مثال (AAPL - 180 يوم)');
+  const runSample = () => runBT(generateSamplePrices(), 'بيانات مثال (AAPL - 180 يوم)', systemSettings);
 
   // استيراد CSV
   const importCSV = () => {
@@ -56,13 +55,12 @@ export default function BacktestPage() {
       const prices: number[] = [];
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(',');
-        const closeCol = cols.length > 4 ? 4 : 1; // Date,Open,High,Low,Close or Date,Close
+        const closeCol = cols.length > 4 ? 4 : 1;
         const p = parseFloat(cols[closeCol]);
         if (!isNaN(p)) prices.push(p);
       }
       setDataInfo(`${file.name} (${prices.length} سجل)`);
-      const r = runBacktest(prices, parseFloat(capital) || 10000, 0.03, 0.001,
-        parseInt(lookback) || 50, parseFloat(alpha) || 0.4, parseFloat(beta) || 0.4, parseFloat(gamma) || 0.2);
+      const r = runBacktest(prices, parseFloat(capital) || 10000, systemSettings);
       setResult(r);
       setLoading(false);
     };
@@ -103,25 +101,47 @@ export default function BacktestPage() {
           </div>
           <div>
             <label className="text-xs font-bold">نافذة المراجعة (يوم)</label>
-            <input className="input" type="number" value={lookback} onChange={e => setLookback(e.target.value)} />
+            <input className="input" type="number" value={systemSettings.backtestLookback} disabled
+              title="يمكن تغييره من الإعدادات" />
           </div>
           <div>
             <label className="text-xs font-bold">α (شارب)</label>
-            <input className="input" type="number" step="0.1" value={alpha} onChange={e => setAlpha(e.target.value)} />
+            <input className="input" type="number" value={systemSettings.alpha} disabled
+              title="يمكن تغييره من الإعدادات" />
           </div>
           <div>
             <label className="text-xs font-bold">β (Z-Score)</label>
-            <input className="input" type="number" step="0.1" value={beta} onChange={e => setBeta(e.target.value)} />
+            <input className="input" type="number" value={systemSettings.beta} disabled
+              title="يمكن تغييره من الإعدادات" />
           </div>
           <div>
             <label className="text-xs font-bold">γ (تكلفة)</label>
-            <input className="input" type="number" step="0.1" value={gamma} onChange={e => setGamma(e.target.value)} />
+            <input className="input" type="number" value={systemSettings.gamma} disabled
+              title="يمكن تغييره من الإعدادات" />
           </div>
         </div>
+
+        <div className="text-xs text-gray-400 mb-3 p-2 rounded bg-gray-50">
+          المعاملات أعلاه تُقرأ من الإعدادات. عدّلها من شاشة الإعدادات → إعدادات النظام أو إعدادات الأصول.
+        </div>
+
+        {/* خيار استخدام إعدادات الأصل */}
+        {assets.length > 0 && (
+          <label className="flex items-center gap-2 mb-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useAssetSettings}
+              onChange={e => setUseAssetSettings(e.target.checked)}
+              className="w-4 h-4 accent-[#1B5E20]"
+            />
+            <span className="text-sm">استخدام إعدادات الأصل المخصصة (إن وجدت)</span>
+          </label>
+        )}
+
         {/* أصول محفوظة */}
         {assets.length > 0 && (
           <div className="mb-3">
-            <label className="text-xs font-bold block mb-2">اختبار من أصل محفوظ (بيانات مربوطة):</label>
+            <label className="text-xs font-bold block mb-2">اختبار من أصل محفوظ:</label>
             <div className="flex flex-wrap gap-2">
               {assets.map(a => {
                 const count = getPriceList(a.id).length;

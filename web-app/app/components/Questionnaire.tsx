@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { InvestorProfile } from '../lib/types';
-import { saveProfile, loadSampleData } from '../lib/store';
+import { saveProfile, loadSampleData, getAssets } from '../lib/store';
 
 const QUESTIONS = [
   {
@@ -78,10 +78,10 @@ const PROFILES: Record<string, Omit<InvestorProfile, 'riskScore' | 'availableCas
 };
 
 const PROFILE_NAMES: Record<string, string> = {
-  aggressive: 'نمو عنيف 🚀',
-  balanced: 'متوازن ⚖️',
-  income: 'دخل ثابت 💰',
-  capital_preservation: 'تأمين رأس المال 🛡️',
+  aggressive: 'نمو عنيف',
+  balanced: 'متوازن',
+  income: 'دخل ثابت',
+  capital_preservation: 'تأمين رأس المال',
 };
 
 export default function Questionnaire({ onComplete }: { onComplete: () => void }) {
@@ -89,6 +89,7 @@ export default function Questionnaire({ onComplete }: { onComplete: () => void }
   const [answers, setAnswers] = useState<number[]>([]);
   const [showResult, setShowResult] = useState(false);
   const [cash, setCash] = useState('10000');
+  const [wantSample, setWantSample] = useState(true);
 
   const handleAnswer = (score: number) => {
     const newAnswers = [...answers, score];
@@ -114,7 +115,13 @@ export default function Questionnaire({ onComplete }: { onComplete: () => void }
       availableCash: parseFloat(cash) || 0,
     };
     saveProfile(finalProfile);
-    loadSampleData(); // تحميل بيانات تجريبية
+
+    // تحميل بيانات تجريبية فقط إذا لا توجد أصول و اختار المستخدم ذلك
+    const existingAssets = getAssets();
+    if (wantSample && existingAssets.length === 0) {
+      loadSampleData();
+    }
+
     onComplete();
   };
 
@@ -135,7 +142,6 @@ export default function Questionnaire({ onComplete }: { onComplete: () => void }
           <h2 className="text-2xl font-bold text-center mb-6">نتيجة التقييم</h2>
 
           <div className="text-center mb-6">
-            <div className="text-5xl mb-2">{riskScore >= 8 ? '🚀' : riskScore >= 5 ? '⚖️' : riskScore >= 3 ? '💰' : '🛡️'}</div>
             <div className="text-xl font-bold" style={{ color: 'var(--primary)' }}>
               {PROFILE_NAMES[profileKey]}
             </div>
@@ -158,6 +164,18 @@ export default function Questionnaire({ onComplete }: { onComplete: () => void }
           <div className="mb-4">
             <label className="block text-sm font-bold mb-1">رأس المال المتاح ($)</label>
             <input className="input" type="number" value={cash} onChange={e => setCash(e.target.value)} />
+          </div>
+
+          <div className="mb-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={wantSample}
+                onChange={e => setWantSample(e.target.checked)}
+                className="w-4 h-4 accent-[#1B5E20]"
+              />
+              <span className="text-sm">تحميل بيانات تجريبية (أصول وأسعار تاريخية للتجربة)</span>
+            </label>
           </div>
 
           <div className="flex gap-3">

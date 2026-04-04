@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { getAssets, getProfile, getPriceList } from '../lib/store';
+import { getAssets, getProfile, getPriceList, getSystemSettings, getEffectiveSettings } from '../lib/store';
 import { analyzeAsset, checkRebalancing } from '../lib/engine';
 import { TradingSignal, RebalanceItem } from '../lib/types';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
@@ -11,32 +11,35 @@ const COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#009688'
 export default function Dashboard({ onRefresh }: { onRefresh: () => void }) {
   const assets = getAssets();
   const profile = getProfile();
+  const systemSettings = getSystemSettings();
   const totalValue = assets.reduce((s, a) => s + a.quantity * a.currentPrice, 0);
   const totalPurchase = assets.reduce((s, a) => s + a.quantity * a.purchasePrice, 0);
   const totalPL = totalValue - totalPurchase;
   const plPercent = totalPurchase > 0 ? (totalPL / totalPurchase) * 100 : 0;
   const cash = profile?.availableCash ?? 0;
 
-  // تحليل الإشارات
+  // تحليل الإشارات باستخدام الإعدادات الفعالة لكل أصل
   const signals = useMemo<TradingSignal[]>(() => {
     return assets.map(a => {
       const prices = getPriceList(a.id);
       if (prices.length < 10) return null;
-      return analyzeAsset(a.name, a.id, a.currentPrice, prices, a.quantity, totalValue, a.targetWeight, cash);
+      const effectiveSettings = getEffectiveSettings(a.id);
+      return analyzeAsset(a.name, a.id, a.currentPrice, prices, a.quantity, totalValue, a.targetWeight, cash, effectiveSettings);
     }).filter(Boolean) as TradingSignal[];
   }, [assets, totalValue, cash]);
 
   const activeSignals = signals.filter(s => s.signalType !== 'none');
 
-  // إعادة التوازن
+  // إعادة التوازن باستخدام عتبة من الإعدادات
   const rebalancing = useMemo<RebalanceItem[]>(() => {
     if (totalValue <= 0) return [];
     return checkRebalancing(
       assets.map(a => a.name),
       assets.map(a => (a.quantity * a.currentPrice) / totalValue),
       assets.map(a => a.targetWeight),
+      systemSettings.rebalanceThreshold,
     );
-  }, [assets, totalValue]);
+  }, [assets, totalValue, systemSettings.rebalanceThreshold]);
 
   // بيانات الرسم البياني
   const pieData = assets.map(a => ({ name: a.name, value: a.quantity * a.currentPrice }));

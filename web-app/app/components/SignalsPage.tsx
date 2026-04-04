@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { getAssets, getProfile, getPriceList, addTrade } from '../lib/store';
+import { getAssets, getProfile, getPriceList, addTrade, getEffectiveSettings } from '../lib/store';
 import { analyzeAsset } from '../lib/engine';
 import { TradingSignal } from '../lib/types';
 
@@ -17,7 +17,8 @@ export default function SignalsPage() {
     return assets.map(a => {
       const prices = getPriceList(a.id);
       if (prices.length < 10) return null;
-      return analyzeAsset(a.name, a.id, a.currentPrice, prices, a.quantity, totalValue, a.targetWeight, cash);
+      const effectiveSettings = getEffectiveSettings(a.id);
+      return analyzeAsset(a.name, a.id, a.currentPrice, prices, a.quantity, totalValue, a.targetWeight, cash, effectiveSettings);
     }).filter(Boolean) as TradingSignal[];
   }, [assets, totalValue, cash]);
 

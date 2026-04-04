@@ -1,16 +1,10 @@
 /**
  * محرك Optimum Score - الخوارزميات المالية
  * تنفيذ كامل بلغة TypeScript
+ * جميع المعاملات ديناميكية من إعدادات النظام
  */
 
-import { TradingSignal, BacktestResult, BacktestTrade, RebalanceItem } from './types';
-
-// المعاملات الافتراضية
-const DEFAULT_ALPHA = 0.4;
-const DEFAULT_BETA = 0.4;
-const DEFAULT_GAMMA = 0.2;
-const DEFAULT_RF = 0.03;
-const DEFAULT_COST = 0.001;
+import { TradingSignal, BacktestResult, BacktestTrade, RebalanceItem, SystemSettings } from './types';
 
 // ============ دوال إحصائية ============
 
@@ -66,16 +60,16 @@ export function calculateRSI(prices: number[], period = 14): number {
   return 100 - 100 / (1 + rs);
 }
 
-export function expectedReturn(returns: number[], annualize = true): number {
+export function expectedReturn(returns: number[], tradingDays = 252): number {
   if (returns.length === 0) return 0;
   const avg = mean(returns);
-  return annualize ? avg * 252 : avg;
+  return avg * tradingDays;
 }
 
-export function volatility(returns: number[], annualize = true): number {
+export function volatility(returns: number[], tradingDays = 252): number {
   if (returns.length < 2) return 0;
   const std = standardDeviation(returns);
-  return annualize ? std * Math.sqrt(252) : std;
+  return std * Math.sqrt(tradingDays);
 }
 
 export function sharpeRatio(expRet: number, rf: number, vol: number): number {
@@ -87,8 +81,8 @@ export function sharpeRatio(expRet: number, rf: number, vol: number): number {
 
 export function computeOptimumScore(
   expRet: number, vol: number, zScore: number,
-  rf = DEFAULT_RF, cost = DEFAULT_COST,
-  alpha = DEFAULT_ALPHA, beta = DEFAULT_BETA, gamma = DEFAULT_GAMMA,
+  rf: number, cost: number,
+  alpha: number, beta: number, gamma: number,
 ): number {
   const sharpe = sharpeRatio(expRet, rf, vol);
   let os = alpha * sharpe + beta * (-zScore) - gamma * cost;
@@ -101,7 +95,7 @@ export function computeOptimumScore(
 export function calculateBuyOrder(
   targetWeight: number, currentWeight: number,
   portfolioValue: number, availableCash: number,
-  currentPrice: number, cashRatio = 0.3,
+  currentPrice: number, cashRatio: number,
 ): { quantity: number; value: number } {
   const rebalanceAmt = (targetWeight - currentWeight) * portfolioValue;
   if (rebalanceAmt <= 0) return { quantity: 0, value: 0 };
@@ -113,7 +107,7 @@ export function calculateBuyOrder(
 export function calculateSellOrder(
   assetQty: number, currentPrice: number,
   currentWeight: number, targetWeight: number,
-  portfolioValue: number, mode: 'rebalance' | 'half' | 'quarter' | 'all' = 'rebalance',
+  portfolioValue: number, mode: 'rebalance' | 'half' | 'quarter' | 'all',
 ): { quantity: number; value: number } {
   let qty: number;
   switch (mode) {
@@ -129,20 +123,23 @@ export function calculateSellOrder(
   return { quantity: qty, value: qty * currentPrice };
 }
 
-// ============ تحليل أصل كامل ============
+// ============ تحليل أصل كامل (يقبل إعدادات ديناميكية) ============
 
 export function analyzeAsset(
   assetName: string, assetId: string,
   currentPrice: number, historicalPrices: number[],
   quantityHeld: number, portfolioValue: number,
   targetWeight: number, availableCash: number,
-  rf = DEFAULT_RF, cost = DEFAULT_COST,
-  alpha = DEFAULT_ALPHA, beta = DEFAULT_BETA, gamma = DEFAULT_GAMMA,
+  settings: SystemSettings,
 ): TradingSignal {
+  const { alpha, beta, gamma, riskFreeRate: rf, transactionCost: cost,
+    buyThreshold, sellThreshold, buyOrderCashRatio, sellMode,
+    zScoreStrongBuy, zScoreStrongSell, tradingDaysPerYear } = settings;
+
   const returns = calculateReturns(historicalPrices);
   const zScore = calculateZScore(currentPrice, historicalPrices);
-  const expRet = expectedReturn(returns);
-  const vol = volatility(returns);
+  const expRet = expectedReturn(returns, tradingDaysPerYear);
+  const vol = volatility(returns, tradingDaysPerYear);
   const os = computeOptimumScore(expRet, vol, zScore, rf, cost, alpha, beta, gamma);
 
   const currentValue = quantityHeld * currentPrice;
@@ -153,29 +150,29 @@ export function analyzeAsset(
   let suggestedQuantity = 0, suggestedValue = 0;
   const reasons: string[] = [];
 
-  if (os >= 0.7) {
+  if (os >= buyThreshold) {
     signalType = 'buy';
-    reasons.push(`Optimum Score مرتفع (${os.toFixed(2)})`);
-    const order = calculateBuyOrder(targetWeight, currentWeight, effPV, availableCash, currentPrice);
+    reasons.push(`Optimum Score مرتفع (${os.toFixed(2)}) >= ${buyThreshold}`);
+    const order = calculateBuyOrder(targetWeight, currentWeight, effPV, availableCash, currentPrice, buyOrderCashRatio);
     suggestedQuantity = order.quantity;
     suggestedValue = order.value;
     if (suggestedQuantity > 0)
       reasons.push(`الوزن الحالي ${(currentWeight * 100).toFixed(1)}% < المستهدف ${(targetWeight * 100).toFixed(1)}%`);
     else reasons.push('لا حاجة للشراء - الوزن متوافق أو لا يوجد نقد كافٍ');
-  } else if (os <= 0.3) {
+  } else if (os <= sellThreshold) {
     signalType = 'sell';
-    reasons.push(`Optimum Score منخفض (${os.toFixed(2)})`);
-    const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, 'half');
+    reasons.push(`Optimum Score منخفض (${os.toFixed(2)}) <= ${sellThreshold}`);
+    const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, sellMode);
     suggestedQuantity = order.quantity;
     suggestedValue = order.value;
     if (suggestedQuantity > 0)
-      reasons.push(`اقتراح بيع نصف المركز (${suggestedQuantity.toFixed(4)} وحدة)`);
+      reasons.push(`اقتراح بيع (${sellMode}) - ${suggestedQuantity.toFixed(4)} وحدة`);
   } else {
     reasons.push(`Optimum Score متوسط (${os.toFixed(2)}) - انتظار`);
   }
 
-  if (zScore < -2) reasons.push(`Z-Score منخفض جداً (${zScore.toFixed(2)}) ← فرصة شراء`);
-  else if (zScore > 2) reasons.push(`Z-Score مرتفع جداً (${zScore.toFixed(2)}) ← فرصة بيع`);
+  if (zScore < zScoreStrongBuy) reasons.push(`Z-Score منخفض جداً (${zScore.toFixed(2)}) ← فرصة شراء`);
+  else if (zScore > zScoreStrongSell) reasons.push(`Z-Score مرتفع جداً (${zScore.toFixed(2)}) ← فرصة بيع`);
 
   return {
     assetName, assetId, signalType, optimumScore: os, zScore,
@@ -187,7 +184,7 @@ export function analyzeAsset(
 // ============ إعادة التوازن ============
 
 export function checkRebalancing(
-  names: string[], currentWeights: number[], targetWeights: number[], threshold = 0.05,
+  names: string[], currentWeights: number[], targetWeights: number[], threshold: number,
 ): RebalanceItem[] {
   const items: RebalanceItem[] = [];
   for (let i = 0; i < names.length; i++) {
@@ -205,7 +202,7 @@ export function checkRebalancing(
 // ============ تحسين الأوزان (Monte Carlo) ============
 
 export function optimizeWeights(
-  expectedReturns: number[], covMatrix: number[][], rf = DEFAULT_RF, iterations = 10000,
+  expectedReturns: number[], covMatrix: number[][], rf: number, iterations: number,
 ): number[] {
   const n = expectedReturns.length;
   if (n === 0) return [];
@@ -237,10 +234,12 @@ export function optimizeWeights(
 // ============ باك تيست ============
 
 export function runBacktest(
-  prices: number[], initialCapital: number,
-  rf = DEFAULT_RF, cost = DEFAULT_COST, lookback = 50,
-  alpha = DEFAULT_ALPHA, beta = DEFAULT_BETA, gamma = DEFAULT_GAMMA,
+  prices: number[], initialCapital: number, settings: SystemSettings,
 ): BacktestResult {
+  const { riskFreeRate: rf, transactionCost: cost, backtestLookback: lookback,
+    alpha, beta, gamma, buyThreshold, sellThreshold,
+    backtestBuyRatio, backtestSellRatio, tradingDaysPerYear } = settings;
+
   if (prices.length < lookback + 1) {
     return { totalReturn: 0, buyAndHoldReturn: 0, numberOfTrades: 0, winRate: 0, trades: [], equityCurve: [initialCapital] };
   }
@@ -254,18 +253,18 @@ export function runBacktest(
     const cp = prices[i];
     const ret = calculateReturns(window);
     const z = calculateZScore(cp, window);
-    const er = expectedReturn(ret);
-    const v = volatility(ret);
+    const er = expectedReturn(ret, tradingDaysPerYear);
+    const v = volatility(ret, tradingDaysPerYear);
     const os = computeOptimumScore(er, v, z, rf, cost, alpha, beta, gamma);
 
-    if (os >= 0.7 && cash > 0) {
-      const invest = cash * 0.3;
+    if (os >= buyThreshold && cash > 0) {
+      const invest = cash * backtestBuyRatio;
       const qty = invest / cp;
       cash -= invest + invest * cost;
       holdings += qty;
       trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os });
-    } else if (os <= 0.3 && holdings > 0) {
-      const qty = holdings * 0.5;
+    } else if (os <= sellThreshold && holdings > 0) {
+      const qty = holdings * backtestSellRatio;
       const val = qty * cp;
       cash += val - val * cost;
       holdings -= qty;
