@@ -1,19 +1,26 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getProfile } from './lib/store';
+import { getProfile, isInitialized } from './lib/store';
 import Questionnaire from './components/Questionnaire';
 import AppShell from './components/AppShell';
 
 export default function Page() {
-  const [hasProfile, setHasProfile] = useState<boolean | null>(null);
+  const [ready, setReady] = useState<'loading' | 'questionnaire' | 'app'>('loading');
 
   useEffect(() => {
-    setHasProfile(getProfile() !== null);
+    try {
+      // التحقق من وجود الملف الاستثماري أو إتمام الإعداد سابقاً
+      const hasProfile = getProfile() !== null;
+      const wasInitialized = isInitialized();
+      setReady(hasProfile || wasInitialized ? 'app' : 'questionnaire');
+    } catch {
+      // في حال فشل localStorage
+      setReady('questionnaire');
+    }
   }, []);
 
-  // شاشة التحميل
-  if (hasProfile === null) {
+  if (ready === 'loading') {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
@@ -27,11 +34,9 @@ export default function Page() {
     );
   }
 
-  // استبيان المخاطر (أول مرة)
-  if (!hasProfile) {
-    return <Questionnaire onComplete={() => setHasProfile(true)} />;
+  if (ready === 'questionnaire') {
+    return <Questionnaire onComplete={() => setReady('app')} />;
   }
 
-  // التطبيق الرئيسي
   return <AppShell />;
 }

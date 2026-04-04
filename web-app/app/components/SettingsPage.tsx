@@ -46,7 +46,11 @@ export default function SettingsPage({ onProfileReset }: { onProfileReset: () =>
 
   const resetProfile = () => {
     if (confirm('هل تريد إعادة تعيين الملف الاستثماري؟ ستحتاج لإعادة الاستبيان.')) {
-      localStorage.clear();
+      // مسح بيانات المحفظة فقط (وليس كل localStorage)
+      const portfolioKeys = Object.keys(localStorage).filter(k => k.startsWith('portfolio_'));
+      for (const key of portfolioKeys) {
+        localStorage.removeItem(key);
+      }
       onProfileReset();
     }
   };

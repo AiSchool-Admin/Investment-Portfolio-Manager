@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { InvestorProfile } from '../lib/types';
-import { saveProfile, loadSampleData, getAssets } from '../lib/store';
+import { saveProfile, loadSampleData, getAssets, setInitialized } from '../lib/store';
 
 const QUESTIONS = [
   {
@@ -115,6 +115,7 @@ export default function Questionnaire({ onComplete }: { onComplete: () => void }
       availableCash: parseFloat(cash) || 0,
     };
     saveProfile(finalProfile);
+    setInitialized(); // تثبيت علامة إتمام الاستبيان لمنع تكراره
 
     // تحميل بيانات تجريبية فقط إذا لا توجد أصول و اختار المستخدم ذلك
     const existingAssets = getAssets();

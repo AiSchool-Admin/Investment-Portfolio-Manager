@@ -14,7 +14,18 @@ const KEYS = {
   assetSettings: 'portfolio_asset_settings',
   plans: 'portfolio_plans',
   notifications: 'portfolio_notifications',
+  initialized: 'portfolio_initialized', // علامة إتمام الاستبيان
 };
+
+// ============ علامة إتمام الإعداد الأولي ============
+
+export function isInitialized(): boolean {
+  return localStorage.getItem(KEYS.initialized) === 'true';
+}
+
+export function setInitialized(): void {
+  localStorage.setItem(KEYS.initialized, 'true');
+}
 
 // ============ الملف الاستثماري ============
 
@@ -224,6 +235,10 @@ export function loadSampleData(): void {
       availableCash: 5000,
     });
   }
+
+  // لا نكتب فوق الأصول الموجودة! نضيف فقط إذا لم تكن موجودة
+  const existingAssets = getAssets();
+  if (existingAssets.length > 0) return; // ← أصول موجودة، لا تُستبدل
 
   const aapl: Asset = {
     id: 'aapl-1', name: 'AAPL', category: 'أسهم',
