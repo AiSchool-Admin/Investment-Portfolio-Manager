@@ -423,8 +423,12 @@ export function analyzeAsset(
     theta: s.rangingTheta, gamma: s.rangingGamma,
   } : s;
 
+  // في السوق المتذبذب: عكس الاتجاه والزخم (mean-reversion)
+  const effTrend = regime === 'ranging' ? -trend : trend;
+  const effMomentum = regime === 'ranging' ? -momentum : momentum;
+
   // حساب OS بالأوزان المناسبة
-  const os = computeOptimumScore(shr, zScoreAdj, trend, rsiSig, momentum, macdSig, lowVolSig, s.transactionCost, effectiveSettings);
+  const os = computeOptimumScore(shr, zScoreAdj, effTrend, rsiSig, effMomentum, macdSig, lowVolSig, s.transactionCost, effectiveSettings);
 
   // عتبات حسب نوع السوق
   const buyTh = regime === 'ranging' ? s.rangingBuyThreshold : s.buyThreshold;
@@ -633,7 +637,12 @@ export function runBacktest(
       theta: settings.rangingTheta, gamma: settings.rangingGamma,
     } : settings;
 
-    const os = computeOptimumScore(shr, zAdj, trend, rsiSig, mom, macdSig, lowVolSig, cost, effSettings);
+    // في السوق المتذبذب: عكس إشارة الاتجاه والزخم (mean-reversion)
+    // "تحت المتوسط" = فرصة شراء (إيجابي) بدل إشارة سلبية
+    const effTrend = regime === 'ranging' ? -trend : trend;
+    const effMom = regime === 'ranging' ? -mom : mom;
+
+    const os = computeOptimumScore(shr, zAdj, effTrend, rsiSig, effMom, macdSig, lowVolSig, cost, effSettings);
     const bTh = regime === 'ranging' ? settings.rangingBuyThreshold : buyThreshold;
     const sTh = regime === 'ranging' ? settings.rangingSellThreshold : sellThreshold;
 
