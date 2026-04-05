@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Asset, CATEGORY_GROUPS, getCategoryColor } from '../lib/types';
-import { getAssets, addAsset, updateAsset, deleteAsset, addPriceRecord, setPriceHistory, getPriceHistory } from '../lib/store';
+import { getAssets, addAsset, updateAsset, deleteAsset, addPriceRecord, setPriceHistory, getPriceHistory, addTrade, getProfile, saveProfile } from '../lib/store';
 
 export default function AssetsPage({ onRefresh }: { onRefresh: () => void }) {
   const [assets, setAssets] = useState(getAssets);
@@ -61,6 +61,10 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
   const [showEditModal, setShowEditModal] = useState(false);
   const [previewData, setPreviewData] = useState<{ date: string; close: number }[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [tradeMode, setTradeMode] = useState<'none' | 'buy' | 'sell'>('none');
+  const [tradeQty, setTradeQty] = useState('');
+  const [tradePrice, setTradePrice] = useState('');
+  const [tradeValue, setTradeValue] = useState(''); // إدخال بالقيمة الإجمالية بدل الكمية
   const val = a.quantity * a.currentPrice;
   const pl = val - a.quantity * a.purchasePrice;
   const plPct = a.purchasePrice > 0 ? ((a.currentPrice - a.purchasePrice) / a.purchasePrice) * 100 : 0;
@@ -167,10 +171,165 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
 
           {/* أزرار الإجراءات */}
           <div className="flex gap-2 mb-3">
-            <button className="btn-primary text-sm flex-1" onClick={() => setShowEditModal(true)}>
-              تعديل البيانات
+            <button className="text-sm flex-1 px-3 py-2 rounded bg-green-600 text-white cursor-pointer hover:bg-green-700"
+              onClick={() => { setTradeMode('buy'); setTradePrice(a.currentPrice.toString()); setTradeQty(''); setTradeValue(''); }}>
+              ↓ شراء / إضافة دفعة
+            </button>
+            <button className="text-sm flex-1 px-3 py-2 rounded bg-red-600 text-white cursor-pointer hover:bg-red-700"
+              onClick={() => { setTradeMode('sell'); setTradePrice(a.currentPrice.toString()); setTradeQty(''); setTradeValue(''); }}>
+              ↑ بيع / جني أرباح
+            </button>
+            <button className="btn-outline text-sm" onClick={() => setShowEditModal(true)}>
+              تعديل
             </button>
           </div>
+
+          {/* نموذج شراء/بيع */}
+          {tradeMode !== 'none' && (
+            <div className={`mb-3 p-3 rounded-lg border-2 ${tradeMode === 'buy' ? 'border-green-400 bg-green-50' : 'border-red-400 bg-red-50'}`}>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-bold text-sm">
+                  {tradeMode === 'buy' ? '↓ شراء / إضافة دفعة استثمارية' : '↑ بيع / جني أرباح'}
+                </h4>
+                <button className="text-xs text-gray-400 hover:text-gray-600 cursor-pointer" onClick={() => setTradeMode('none')}>✕</button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <div>
+                  <label className="text-xs font-bold block mb-0.5">سعر التنفيذ</label>
+                  <input className="input text-sm" type="number" step="any" placeholder={a.currentPrice.toString()}
+                    value={tradePrice} onChange={e => setTradePrice(e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs font-bold block mb-0.5">الكمية (وحدات)</label>
+                  <input className="input text-sm" type="number" step="any" placeholder="الكمية"
+                    value={tradeQty} onChange={e => {
+                      setTradeQty(e.target.value);
+                      const q = parseFloat(e.target.value);
+                      const p = parseFloat(tradePrice) || a.currentPrice;
+                      if (q > 0) setTradeValue((q * p).toFixed(2));
+                    }} />
+                </div>
+              </div>
+
+              <div className="mb-2">
+                <label className="text-xs font-bold block mb-0.5">أو أدخل القيمة الإجمالية ($)</label>
+                <input className="input text-sm" type="number" step="any" placeholder="المبلغ الإجمالي"
+                  value={tradeValue} onChange={e => {
+                    setTradeValue(e.target.value);
+                    const v = parseFloat(e.target.value);
+                    const p = parseFloat(tradePrice) || a.currentPrice;
+                    if (v > 0 && p > 0) setTradeQty((v / p).toFixed(6));
+                  }} />
+              </div>
+
+              {/* ملخص */}
+              {(parseFloat(tradeQty) > 0 || parseFloat(tradeValue) > 0) && (
+                <div className="text-xs bg-white rounded p-2 mb-2">
+                  <div className="flex justify-between">
+                    <span>الكمية:</span>
+                    <b>{parseFloat(tradeQty || '0').toFixed(4)} وحدة</b>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>السعر:</span>
+                    <b>${(parseFloat(tradePrice) || a.currentPrice).toFixed(4)}</b>
+                  </div>
+                  <div className="flex justify-between font-bold">
+                    <span>القيمة الإجمالية:</span>
+                    <b>${parseFloat(tradeValue || '0').toFixed(2)}</b>
+                  </div>
+                  {tradeMode === 'buy' && (
+                    <div className="flex justify-between text-gray-500 mt-1">
+                      <span>الكمية بعد الشراء:</span>
+                      <b>{(a.quantity + parseFloat(tradeQty || '0')).toFixed(4)}</b>
+                    </div>
+                  )}
+                  {tradeMode === 'sell' && (
+                    <>
+                      <div className="flex justify-between text-gray-500 mt-1">
+                        <span>الكمية بعد البيع:</span>
+                        <b>{Math.max(0, a.quantity - parseFloat(tradeQty || '0')).toFixed(4)}</b>
+                      </div>
+                      {a.purchasePrice > 0 && (
+                        <div className="flex justify-between mt-1">
+                          <span>الربح/الخسارة:</span>
+                          {(() => {
+                            const sellPrice = parseFloat(tradePrice) || a.currentPrice;
+                            const profit = (sellPrice - a.purchasePrice) * parseFloat(tradeQty || '0');
+                            return <b className={profit >= 0 ? 'text-green-600' : 'text-red-600'}>
+                              {profit >= 0 ? '+' : ''}${profit.toFixed(2)}
+                            </b>;
+                          })()}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* أزرار سريعة للبيع */}
+              {tradeMode === 'sell' && a.quantity > 0 && (
+                <div className="flex gap-1 mb-2">
+                  <span className="text-xs text-gray-400 leading-6">بيع:</span>
+                  {[25, 50, 75, 100].map(pct => (
+                    <button key={pct} className="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-100 cursor-pointer"
+                      onClick={() => {
+                        const q = a.quantity * pct / 100;
+                        const p = parseFloat(tradePrice) || a.currentPrice;
+                        setTradeQty(q.toFixed(6));
+                        setTradeValue((q * p).toFixed(2));
+                      }}>
+                      {pct}%
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <button
+                className={`w-full text-sm py-2 rounded text-white cursor-pointer font-bold ${
+                  tradeMode === 'buy' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                }`}
+                onClick={() => {
+                  const qty = parseFloat(tradeQty);
+                  const price = parseFloat(tradePrice) || a.currentPrice;
+                  if (!qty || qty <= 0) return alert('أدخل الكمية أو القيمة');
+                  if (tradeMode === 'sell' && qty > a.quantity) return alert(`لا يمكن بيع أكثر من ${a.quantity} وحدة`);
+
+                  // تسجيل الصفقة
+                  addTrade({
+                    assetId: a.id, assetName: a.name,
+                    type: tradeMode, quantity: qty, price,
+                    totalValue: qty * price,
+                    date: new Date().toISOString().split('T')[0],
+                  });
+
+                  // تحديث الأصل
+                  const newQty = tradeMode === 'buy' ? a.quantity + qty : a.quantity - qty;
+                  // متوسط سعر الشراء المرجح (للشراء فقط)
+                  const newPurchasePrice = tradeMode === 'buy'
+                    ? ((a.purchasePrice * a.quantity) + (price * qty)) / (a.quantity + qty)
+                    : a.purchasePrice;
+                  onUpdate({ ...a, quantity: Math.max(0, newQty), purchasePrice: newPurchasePrice, currentPrice: price });
+
+                  // تحديث النقد
+                  const profile = getProfile();
+                  if (profile) {
+                    const cashChange = tradeMode === 'buy' ? -(qty * price) : (qty * price);
+                    saveProfile({ ...profile, availableCash: Math.max(0, profile.availableCash + cashChange) });
+                  }
+
+                  // إضافة سجل سعر
+                  addPriceRecord(a.id, { date: new Date().toISOString().split('T')[0], close: price });
+
+                  setTradeMode('none');
+                  alert(`تم تسجيل ${tradeMode === 'buy' ? 'الشراء' : 'البيع'} بنجاح ✓`);
+                  onReload();
+                }}
+              >
+                {tradeMode === 'buy' ? `تأكيد الشراء ✓` : `تأكيد البيع ✓`}
+              </button>
+            </div>
+          )}
 
           {/* البيانات التاريخية */}
           <div className="mb-3 p-3 rounded-lg" style={{ background: historyCount >= 50 ? 'var(--primary-bg)' : 'var(--warning-bg)' }}>
