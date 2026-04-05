@@ -49,7 +49,7 @@ export default function AppShell() {
 
       {/* المحتوى */}
       <main className="flex-1 overflow-auto pb-20 md:pb-4">
-        {tab === 'dashboard' && <Dashboard key={refreshKey} onRefresh={refresh} />}
+        {tab === 'dashboard' && <Dashboard key={refreshKey} onRefresh={refresh} onNavigate={setTab} />}
         {tab === 'assets' && <AssetsPage key={refreshKey} onRefresh={refresh} />}
         {tab === 'builder' && <PositionBuilderPage key={refreshKey} onRefresh={refresh} />}
         {tab === 'signals' && <SignalsPage key={refreshKey} />}
