@@ -69,7 +69,30 @@ export interface Trade {
   price: number;
   totalValue: number;
   date: string;
+  source?: string;  // مصدر التمويل (شراء) أو وعاء الاستلام (بيع)
+  notes?: string;   // ملاحظات
 }
+
+// مصادر التمويل / أوعية الاستلام
+export const FUNDING_SOURCES = [
+  { value: 'cash', label: 'النقدية الحالية في المحفظة' },
+  { value: 'bank_transfer', label: 'تحويل بنكي' },
+  { value: 'external', label: 'مصدر تمويل خارجي' },
+  { value: 'dividend', label: 'أرباح موزعة (إعادة استثمار)' },
+  { value: 'salary', label: 'مدخرات / راتب' },
+  { value: 'loan', label: 'تمويل / قرض' },
+  { value: 'gift', label: 'هبة / منحة' },
+  { value: 'other', label: 'أخرى' },
+];
+
+export const RECEIVING_DESTINATIONS = [
+  { value: 'cash', label: 'النقدية الحالية في المحفظة' },
+  { value: 'bank_transfer', label: 'تحويل إلى حساب بنكي' },
+  { value: 'reinvest', label: 'إعادة استثمار في أصل آخر' },
+  { value: 'withdrawal', label: 'سحب نقدي' },
+  { value: 'expense', label: 'مصاريف / التزامات' },
+  { value: 'other', label: 'أخرى' },
+];
 
 export interface BacktestResult {
   totalReturn: number;

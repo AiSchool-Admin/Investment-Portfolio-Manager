@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Asset, CATEGORY_GROUPS, getCategoryColor } from '../lib/types';
+import { Asset, CATEGORY_GROUPS, getCategoryColor, FUNDING_SOURCES, RECEIVING_DESTINATIONS } from '../lib/types';
 import { getAssets, addAsset, updateAsset, deleteAsset, addPriceRecord, setPriceHistory, getPriceHistory, addTrade, getProfile, saveProfile } from '../lib/store';
 
 export default function AssetsPage({ onRefresh }: { onRefresh: () => void }) {
@@ -64,7 +64,9 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
   const [tradeMode, setTradeMode] = useState<'none' | 'buy' | 'sell'>('none');
   const [tradeQty, setTradeQty] = useState('');
   const [tradePrice, setTradePrice] = useState('');
-  const [tradeValue, setTradeValue] = useState(''); // إدخال بالقيمة الإجمالية بدل الكمية
+  const [tradeValue, setTradeValue] = useState('');
+  const [fundingSource, setFundingSource] = useState('cash'); // مصدر التمويل
+  const [tradeNotes, setTradeNotes] = useState('');
   const val = a.quantity * a.currentPrice;
   const pl = val - a.quantity * a.purchasePrice;
   const plPct = a.purchasePrice > 0 ? ((a.currentPrice - a.purchasePrice) / a.purchasePrice) * 100 : 0;
@@ -285,6 +287,31 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
                 </div>
               )}
 
+              {/* مصدر التمويل / وعاء الاستلام */}
+              <div className="mb-2">
+                <label className="text-xs font-bold block mb-0.5">
+                  {tradeMode === 'buy' ? 'مصدر التمويل' : 'وعاء الاستلام'}
+                </label>
+                <select className="input text-sm" value={fundingSource}
+                  onChange={e => setFundingSource(e.target.value)}>
+                  {(tradeMode === 'buy' ? FUNDING_SOURCES : RECEIVING_DESTINATIONS).map(s => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+                {fundingSource === 'cash' && tradeMode === 'buy' && (
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    النقد المتاح: <b>${(getProfile()?.availableCash ?? 0).toFixed(2)}</b>
+                  </div>
+                )}
+              </div>
+
+              {/* ملاحظات */}
+              <div className="mb-2">
+                <label className="text-xs font-bold block mb-0.5">ملاحظات (اختياري)</label>
+                <input className="input text-sm" placeholder="مثال: دفعة DCA شهرية"
+                  value={tradeNotes} onChange={e => setTradeNotes(e.target.value)} />
+              </div>
+
               <button
                 className={`w-full text-sm py-2 rounded text-white cursor-pointer font-bold ${
                   tradeMode === 'buy' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
@@ -295,34 +322,58 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
                   if (!qty || qty <= 0) return alert('أدخل الكمية أو القيمة');
                   if (tradeMode === 'sell' && qty > a.quantity) return alert(`لا يمكن بيع أكثر من ${a.quantity} وحدة`);
 
+                  const totalVal = qty * price;
+                  const sourceLabel = tradeMode === 'buy'
+                    ? FUNDING_SOURCES.find(s => s.value === fundingSource)?.label
+                    : RECEIVING_DESTINATIONS.find(s => s.value === fundingSource)?.label;
+
+                  // تحقق: هل النقد كافي إذا كان المصدر = النقدية
+                  if (tradeMode === 'buy' && fundingSource === 'cash') {
+                    const currentCash = getProfile()?.availableCash ?? 0;
+                    if (totalVal > currentCash) {
+                      return alert(`النقد المتاح ($${currentCash.toFixed(2)}) أقل من قيمة الشراء ($${totalVal.toFixed(2)})`);
+                    }
+                  }
+
                   // تسجيل الصفقة
                   addTrade({
                     assetId: a.id, assetName: a.name,
                     type: tradeMode, quantity: qty, price,
-                    totalValue: qty * price,
+                    totalValue: totalVal,
                     date: new Date().toISOString().split('T')[0],
+                    source: `${sourceLabel}${tradeNotes ? ' | ' + tradeNotes : ''}`,
+                    notes: tradeNotes,
                   });
 
                   // تحديث الأصل
                   const newQty = tradeMode === 'buy' ? a.quantity + qty : a.quantity - qty;
-                  // متوسط سعر الشراء المرجح (للشراء فقط)
-                  const newPurchasePrice = tradeMode === 'buy'
+                  const newPurchasePrice = tradeMode === 'buy' && (a.quantity + qty) > 0
                     ? ((a.purchasePrice * a.quantity) + (price * qty)) / (a.quantity + qty)
                     : a.purchasePrice;
                   onUpdate({ ...a, quantity: Math.max(0, newQty), purchasePrice: newPurchasePrice, currentPrice: price });
 
-                  // تحديث النقد
+                  // تحديث النقد حسب المصدر/الوعاء
                   const profile = getProfile();
                   if (profile) {
-                    const cashChange = tradeMode === 'buy' ? -(qty * price) : (qty * price);
-                    saveProfile({ ...profile, availableCash: Math.max(0, profile.availableCash + cashChange) });
+                    if (tradeMode === 'buy' && fundingSource === 'cash') {
+                      // شراء من النقدية → خصم
+                      saveProfile({ ...profile, availableCash: Math.max(0, profile.availableCash - totalVal) });
+                    } else if (tradeMode === 'buy' && fundingSource !== 'cash') {
+                      // شراء من مصدر خارجي → لا يُخصم من النقد (المال جاء من الخارج)
+                    } else if (tradeMode === 'sell' && fundingSource === 'cash') {
+                      // بيع → إضافة للنقدية
+                      saveProfile({ ...profile, availableCash: profile.availableCash + totalVal });
+                    } else if (tradeMode === 'sell' && fundingSource !== 'cash') {
+                      // بيع → تحويل خارجي → لا يُضاف للنقد
+                    }
                   }
 
-                  // إضافة سجل سعر
                   addPriceRecord(a.id, { date: new Date().toISOString().split('T')[0], close: price });
 
                   setTradeMode('none');
-                  alert(`تم تسجيل ${tradeMode === 'buy' ? 'الشراء' : 'البيع'} بنجاح ✓`);
+                  setTradeNotes('');
+                  setFundingSource('cash');
+                  alert(`تم تسجيل ${tradeMode === 'buy' ? 'الشراء' : 'البيع'} بنجاح ✓\nالمصدر: ${sourceLabel}`);
                   onReload();
                 }}
               >
