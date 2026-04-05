@@ -1,15 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getProfile, saveProfile } from './lib/store';
+import { getProfile, saveProfile, getAssets, loadSampleData } from './lib/store';
 import AppShell from './components/AppShell';
 
 export default function Page() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // إذا لم يكن هناك ملف استثماري، ننشئ ملفاً افتراضياً (متوازن)
-    // لا نعرض أي استبيان - المستخدم يعدّل من الإعدادات
+    // إذا لم يكن هناك ملف استثماري، ننشئ ملفاً افتراضياً
     if (!getProfile()) {
       saveProfile({
         riskScore: 5,
@@ -22,6 +21,10 @@ export default function Page() {
         cashWeight: 0.10,
         availableCash: 10000,
       });
+    }
+    // إذا لم تكن هناك أصول، نحمّل بيانات تجريبية تلقائياً
+    if (getAssets().length === 0) {
+      loadSampleData();
     }
     setReady(true);
   }, []);
