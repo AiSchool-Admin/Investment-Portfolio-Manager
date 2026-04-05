@@ -48,7 +48,7 @@ export async function syncFromSupabase(): Promise<boolean> {
       localStorage.setItem(KEYS.profile, JSON.stringify(p));
     }
 
-    // سحب الأصول
+    // سحب الأصول (فقط إذا Supabase فيه بيانات - لا نكتب فوق المحلي بالفارغ)
     const { data: assetsData } = await client.from('assets').select('*').order('created_at');
     if (assetsData && assetsData.length > 0) {
       const assets: Asset[] = assetsData.map(r => ({
@@ -60,13 +60,20 @@ export async function syncFromSupabase(): Promise<boolean> {
 
       // سحب الأسعار التاريخية
       const { data: pricesData } = await client.from('price_history').select('*').order('date');
-      if (pricesData) {
+      if (pricesData && pricesData.length > 0) {
         const priceMap: Record<string, PriceRecord[]> = {};
         for (const r of pricesData) {
           if (!priceMap[r.asset_id]) priceMap[r.asset_id] = [];
           priceMap[r.asset_id].push({ date: r.date, close: r.close_price });
         }
         localStorage.setItem(KEYS.priceHistory, JSON.stringify(priceMap));
+      }
+    }
+    // إذا Supabase فارغ لكن localStorage فيه بيانات → ارفع المحلي إلى Supabase
+    else if (!assetsData || assetsData.length === 0) {
+      const localAssets = JSON.parse(localStorage.getItem(KEYS.assets) || '[]');
+      if (localAssets.length > 0) {
+        pushAllToSupabase();
       }
     }
 

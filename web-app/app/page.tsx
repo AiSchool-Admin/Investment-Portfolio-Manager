@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getProfile, saveProfile, getAssets, loadSampleData, syncFromSupabase } from './lib/store';
+import { getProfile, saveProfile, syncFromSupabase } from './lib/store';
 import { isSupabaseConfigured } from './lib/supabaseClient';
 import AppShell from './components/AppShell';
 
@@ -11,7 +11,7 @@ export default function Page() {
 
   useEffect(() => {
     async function init() {
-      // إذا Supabase متصل → سحب البيانات من قاعدة البيانات أولاً
+      // إذا Supabase متصل → سحب البيانات من قاعدة البيانات
       if (isSupabaseConfigured()) {
         setStatus('جاري الاتصال بقاعدة البيانات...');
         await syncFromSupabase();
@@ -25,11 +25,6 @@ export default function Page() {
           commoditiesWeight: 0.10, realEstateWeight: 0.10, cashWeight: 0.10,
           availableCash: 10000,
         });
-      }
-
-      // إذا لم تكن هناك أصول → نحمّل بيانات تجريبية
-      if (getAssets().length === 0) {
-        loadSampleData();
       }
 
       setReady(true);
