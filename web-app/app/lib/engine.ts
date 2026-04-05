@@ -136,10 +136,148 @@ export function macdToSignal(histogram: number, currentPrice: number): number {
 // تقلب < 10% → +1 (ممتاز)، تقلب > 40% → -1 (خطر)
 export function lowVolatilitySignal(vol: number): number {
   if (vol <= 0) return 0;
-  // عكسي: تقلب منخفض = إيجابي
-  const targetVol = 0.15; // التقلب المرجعي
+  const targetVol = 0.15;
   const signal = (targetVol - vol) / targetVol;
   return Math.max(-1, Math.min(1, signal));
+}
+
+// ============ ADX - مؤشر قوة الاتجاه ============
+// ADX < 20 → سوق متذبذب | ADX ≥ 20 → سوق ذو اتجاه
+
+export function calculateADX(prices: number[], period = 14): number {
+  if (prices.length < period * 2 + 1) return 25; // افتراضي: اتجاه
+  const len = prices.length;
+
+  // حساب True Range و +DM و -DM
+  const tr: number[] = [];
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
+
+  for (let i = 1; i < len; i++) {
+    const high = prices[i];
+    const low = prices[i]; // نستخدم close كتقريب (لا يوجد high/low)
+    const prevHigh = prices[i - 1];
+    const prevLow = prices[i - 1];
+    const prevClose = prices[i - 1];
+
+    // True Range (تقريب باستخدام close فقط)
+    tr.push(Math.abs(prices[i] - prices[i - 1]));
+
+    // +DM و -DM
+    const upMove = high - prevHigh;
+    const downMove = prevLow - low;
+    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+
+  if (tr.length < period) return 25;
+
+  // متوسط متحرك أسي
+  const smooth = (arr: number[], p: number): number[] => {
+    const result: number[] = [];
+    let sum = 0;
+    for (let i = 0; i < p && i < arr.length; i++) sum += arr[i];
+    result.push(sum);
+    for (let i = p; i < arr.length; i++) {
+      result.push(result[result.length - 1] - result[result.length - 1] / p + arr[i]);
+    }
+    return result;
+  };
+
+  const smoothTR = smooth(tr, period);
+  const smoothPlusDM = smooth(plusDM, period);
+  const smoothMinusDM = smooth(minusDM, period);
+
+  const minLen = Math.min(smoothTR.length, smoothPlusDM.length, smoothMinusDM.length);
+  if (minLen === 0) return 25;
+
+  // حساب +DI و -DI
+  const dx: number[] = [];
+  for (let i = 0; i < minLen; i++) {
+    if (smoothTR[i] === 0) continue;
+    const plusDI = (smoothPlusDM[i] / smoothTR[i]) * 100;
+    const minusDI = (smoothMinusDM[i] / smoothTR[i]) * 100;
+    const diSum = plusDI + minusDI;
+    if (diSum > 0) {
+      dx.push(Math.abs(plusDI - minusDI) / diSum * 100);
+    }
+  }
+
+  if (dx.length < period) return dx.length > 0 ? mean(dx) : 25;
+
+  // ADX = متوسط DX
+  return mean(dx.slice(-period));
+}
+
+// تحديد نوع السوق: متذبذب أو ذو اتجاه
+export type MarketRegime = 'trending' | 'ranging';
+
+// كشف التذبذب بعدة طرق (أكثر دقة من ADX وحده)
+export function detectMarketRegime(prices: number[], adxThreshold = 20, maPeriod = 50): MarketRegime {
+  if (prices.length < maPeriod + 10) return 'trending'; // بيانات غير كافية
+
+  const adx = calculateADX(prices);
+
+  // طريقة إضافية: عدد تقاطعات المتوسط المتحرك
+  // إذا السعر تقاطع مع MA عدة مرات → متذبذب
+  const recent = prices.slice(-maPeriod);
+  const ma = mean(recent);
+  let crossings = 0;
+  for (let i = 1; i < recent.length; i++) {
+    if ((recent[i] > ma && recent[i - 1] <= ma) || (recent[i] < ma && recent[i - 1] >= ma)) {
+      crossings++;
+    }
+  }
+
+  // طريقة إضافية: العائد الصافي مقارنة بالتقلب
+  // عائد صافي صغير + تقلب عالي = متذبذب
+  const netReturn = Math.abs((prices[prices.length - 1] - prices[prices.length - maPeriod]) / prices[prices.length - maPeriod]);
+  const vol = standardDeviation(calculateReturns(recent));
+  const efficiencyRatio = vol > 0 ? netReturn / (vol * Math.sqrt(maPeriod)) : 1;
+
+  // متذبذب إذا: ADX < عتبة أو تقاطعات كثيرة أو عائد صافي ضعيف
+  if (adx < adxThreshold) return 'ranging';
+  if (crossings >= 4) return 'ranging';
+  if (efficiencyRatio < 0.3) return 'ranging';
+
+  return 'trending';
+}
+
+// ============ Bollinger Bands ============
+
+export interface BollingerBands {
+  upper: number;
+  middle: number;
+  lower: number;
+  width: number;       // عرض النطاق (نسبة)
+  percentB: number;    // موقع السعر داخل النطاق (0-1)
+}
+
+export function calculateBollingerBands(prices: number[], period = 20, stdMultiplier = 2): BollingerBands {
+  if (prices.length < period) {
+    const m = mean(prices);
+    return { upper: m, middle: m, lower: m, width: 0, percentB: 0.5 };
+  }
+
+  const recent = prices.slice(-period);
+  const middle = mean(recent);
+  const std = standardDeviation(recent);
+  const upper = middle + stdMultiplier * std;
+  const lower = middle - stdMultiplier * std;
+  const currentPrice = prices[prices.length - 1];
+  const width = middle > 0 ? (upper - lower) / middle : 0;
+  const percentB = upper !== lower ? (currentPrice - lower) / (upper - lower) : 0.5;
+
+  return { upper, middle, lower, width, percentB };
+}
+
+// تحويل Bollinger إلى إشارة (-1 إلى +1)
+// السعر عند الحد السفلي → +1 (فرصة شراء)
+// السعر عند الحد العلوي → -1 (فرصة بيع)
+export function bollingerToSignal(percentB: number): number {
+  if (percentB <= 0) return 1;    // تحت الحد السفلي
+  if (percentB >= 1) return -1;   // فوق الحد العلوي
+  return 1 - percentB * 2;        // خطي: 0→1, 0.5→0, 1→-1
 }
 
 // مصفوفة الارتباط بين أصلين
@@ -297,16 +435,40 @@ export function analyzeAsset(
   const shr = sharpeRatio(expRet, s.riskFreeRate, vol);
   const lowVolSig = lowVolatilitySignal(vol);
 
-  // حساب OS
-  const os = computeOptimumScore(shr, zScoreAdj, trend, rsiSig, momentum, macdSig, lowVolSig, s.transactionCost, s);
+  // كشف نوع السوق (متذبذب أو ذو اتجاه)
+  const adx = calculateADX(historicalPrices, s.adxPeriod);
+  const regime = detectMarketRegime(historicalPrices, s.adxThreshold, s.maPeriod);
+  const bb = calculateBollingerBands(historicalPrices, s.bollingerPeriod, s.bollingerStdDev);
+  const bbSignal = bollingerToSignal(bb.percentB);
+
+  // اختيار الأوزان حسب نوع السوق
+  const effectiveSettings = regime === 'ranging' ? {
+    ...s,
+    alpha: s.rangingAlpha, beta: s.rangingBeta, delta: s.rangingDelta,
+    epsilon: s.rangingEpsilon, zeta: s.rangingZeta, eta: s.rangingEta,
+    theta: s.rangingTheta, gamma: s.rangingGamma,
+  } : s;
+
+  // في السوق المتذبذب: عكس الاتجاه والزخم وMACD (mean-reversion)
+  const effTrend = regime === 'ranging' ? -trend : trend;
+  const effMomentum = regime === 'ranging' ? -momentum : momentum;
+  const effMacdSig = regime === 'ranging' ? -macdSig : macdSig;
+
+  // حساب OS بالأوزان المناسبة
+  const os = computeOptimumScore(shr, zScoreAdj, effTrend, rsiSig, effMomentum, effMacdSig, lowVolSig, s.transactionCost, effectiveSettings);
+
+  // عتبات حسب نوع السوق
+  const buyTh = regime === 'ranging' ? s.rangingBuyThreshold : s.buyThreshold;
+  const sellTh = regime === 'ranging' ? s.rangingSellThreshold : s.sellThreshold;
 
   // الأوزان
   const currentValue = quantityHeld * currentPrice;
   const effPV = portfolioValue > 0 ? portfolioValue : currentValue + availableCash;
   const currentWeight = effPV > 0 ? currentValue / effPV : 0;
 
-  // Trailing Stop
+  // Trailing Stop + Hard Stop Loss
   const profitPct = purchasePrice > 0 ? (currentPrice - purchasePrice) / purchasePrice : 0;
+  const lossPct = purchasePrice > 0 ? (purchasePrice - currentPrice) / purchasePrice : 0;
 
   // تحديد الإشارة
   let signalType: 'buy' | 'sell' | 'none' = 'none';
@@ -314,8 +476,18 @@ export function analyzeAsset(
   let suggestedQuantity = 0, suggestedValue = 0;
   const reasons: string[] = [];
 
+  // 0. وقف خسارة ثابت (Hard Stop Loss)
+  if (s.hardStopLossEnabled && lossPct >= s.hardStopLossPercent && quantityHeld > 0) {
+    signalType = 'sell';
+    signalSource = 'trailing_stop';
+    reasons.push(`وقف خسارة: انخفض ${(lossPct * 100).toFixed(1)}% عن سعر الشراء (حد ${(s.hardStopLossPercent * 100).toFixed(0)}%)`);
+    const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, 'all');
+    suggestedQuantity = order.quantity;
+    suggestedValue = order.value;
+  }
+
   // 1. Trailing Stop
-  if (s.trailingStopEnabled && profitPct > s.trailingStopProfitTrigger && quantityHeld > 0) {
+  if (signalType === 'none' && s.trailingStopEnabled && profitPct > s.trailingStopProfitTrigger && quantityHeld > 0) {
     const maxPrice = Math.max(...historicalPrices.slice(-60));
     const dropFromMax = maxPrice > 0 ? (maxPrice - currentPrice) / maxPrice : 0;
     if (dropFromMax >= s.trailingStopDistance) {
@@ -328,29 +500,55 @@ export function analyzeAsset(
     }
   }
 
-  // 2. إشارات OS المشروطة
+  // 2. إشارات OS المشروطة (حسب نوع السوق)
   if (signalType === 'none') {
-    if (os >= s.buyThreshold && trend >= 0 && rsiSig >= -0.5) {
-      signalType = 'buy';
-      reasons.push(`OS ${(os * 100).toFixed(0)}% ≥ ${(s.buyThreshold * 100).toFixed(0)}%`);
-      if (trend > 0) reasons.push(`الاتجاه صاعد (فوق MA${s.maPeriod})`);
-      if (rsi < 30) reasons.push(`RSI ${rsi.toFixed(0)} → تشبع بيعي (فرصة)`);
-      const order = calculateBuyOrder(targetWeight, currentWeight, effPV, availableCash, currentPrice, s.buyOrderCashRatio);
-      suggestedQuantity = order.quantity;
-      suggestedValue = order.value;
-      if (suggestedQuantity <= 0) reasons.push('لا حاجة للشراء - الوزن متوافق أو لا يوجد نقد كافٍ');
-    } else if (os <= s.sellThreshold && trend <= 0 && rsiSig <= 0.5) {
-      signalType = 'sell';
-      reasons.push(`OS ${(os * 100).toFixed(0)}% ≤ ${(s.sellThreshold * 100).toFixed(0)}%`);
-      if (trend < 0) reasons.push(`الاتجاه هابط (تحت MA${s.maPeriod})`);
-      if (rsi > 70) reasons.push(`RSI ${rsi.toFixed(0)} → تشبع شرائي (خطر)`);
-      const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, s.sellMode);
-      suggestedQuantity = order.quantity;
-      suggestedValue = order.value;
+    if (regime === 'trending') {
+      // === سوق ذو اتجاه: الشروط الأصلية ===
+      if (os >= buyTh && trend >= 0 && rsiSig >= -0.5) {
+        signalType = 'buy';
+        reasons.push(`[اتجاه ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% ≥ ${(buyTh * 100).toFixed(0)}%`);
+        if (trend > 0) reasons.push(`الاتجاه صاعد (فوق MA${s.maPeriod})`);
+        const order = calculateBuyOrder(targetWeight, currentWeight, effPV, availableCash, currentPrice, s.buyOrderCashRatio);
+        suggestedQuantity = order.quantity; suggestedValue = order.value;
+        if (suggestedQuantity <= 0) reasons.push('لا حاجة للشراء - الوزن متوافق أو لا يوجد نقد كافٍ');
+      } else if (os <= sellTh && trend <= 0 && rsiSig <= 0.5) {
+        signalType = 'sell';
+        reasons.push(`[اتجاه ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% ≤ ${(sellTh * 100).toFixed(0)}%`);
+        if (trend < 0) reasons.push(`الاتجاه هابط (تحت MA${s.maPeriod})`);
+        const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, s.sellMode);
+        suggestedQuantity = order.quantity; suggestedValue = order.value;
+      } else {
+        reasons.push(`[اتجاه ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% - انتظار`);
+        if (os >= buyTh && trend < 0) reasons.push(`OS مرتفع لكن الاتجاه هابط`);
+        if (os <= sellTh && trend > 0) reasons.push(`OS منخفض لكن الاتجاه صاعد`);
+      }
     } else {
-      reasons.push(`OS ${(os * 100).toFixed(0)}% - انتظار`);
-      if (os >= s.buyThreshold && trend < 0) reasons.push(`OS مرتفع لكن الاتجاه هابط → لا شراء`);
-      if (os <= s.sellThreshold && trend > 0) reasons.push(`OS منخفض لكن الاتجاه صاعد → لا بيع`);
+      // === سوق متذبذب: شراء عند الدعم، بيع عند المقاومة ===
+      const nearSupport = bb.percentB < 0.2 || zScoreAdj < -1.5;
+      const nearResistance = bb.percentB > 0.8 || zScoreAdj > 1.5;
+
+      if (os >= buyTh && nearSupport) {
+        signalType = 'buy';
+        reasons.push(`[متذبذب ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% + سعر قرب الدعم`);
+        if (bb.percentB < 0.2) reasons.push(`Bollinger: السعر عند الحد السفلي ($${bb.lower.toFixed(2)})`);
+        if (zScoreAdj < -1.5) reasons.push(`Z-Score ${zScoreAdj.toFixed(2)} ← أقل من المتوسط`);
+        if (rsi < 30) reasons.push(`RSI ${rsi.toFixed(0)} → تشبع بيعي`);
+        const order = calculateBuyOrder(targetWeight, currentWeight, effPV, availableCash, currentPrice, s.buyOrderCashRatio);
+        suggestedQuantity = order.quantity; suggestedValue = order.value;
+        if (suggestedQuantity <= 0) reasons.push('لا حاجة للشراء - الوزن متوافق أو لا يوجد نقد كافٍ');
+      } else if (os <= sellTh && nearResistance && quantityHeld > 0) {
+        signalType = 'sell';
+        reasons.push(`[متذبذب ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% + سعر قرب المقاومة`);
+        if (bb.percentB > 0.8) reasons.push(`Bollinger: السعر عند الحد العلوي ($${bb.upper.toFixed(2)})`);
+        if (zScoreAdj > 1.5) reasons.push(`Z-Score ${zScoreAdj.toFixed(2)} ← أعلى من المتوسط`);
+        if (rsi > 70) reasons.push(`RSI ${rsi.toFixed(0)} → تشبع شرائي`);
+        const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, s.sellMode);
+        suggestedQuantity = order.quantity; suggestedValue = order.value;
+      } else {
+        reasons.push(`[متذبذب ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% - انتظار`);
+        if (!nearSupport && os >= buyTh) reasons.push(`OS مرتفع لكن السعر ليس قرب الدعم`);
+        if (!nearResistance && os <= sellTh) reasons.push(`OS منخفض لكن السعر ليس قرب المقاومة`);
+      }
     }
   }
 
@@ -362,6 +560,7 @@ export function analyzeAsset(
     factors: {
       sharpe: shr, zScore, zScoreAdj, trend, trendStrength,
       rsi, rsiSignal: rsiSig, momentum, macd: macdSig, lowVolSignal: lowVolSig, ma50: ma,
+      adx, regime, bollingerPercentB: bb.percentB,
     },
     expectedReturn: expRet, volatility: vol, currentPrice,
     currentWeight, targetWeight, suggestedQuantity, suggestedValue, reasons,
@@ -425,13 +624,15 @@ export function runBacktest(
   }
 
   let cash = initialCapital, holdings = 0;
+  let avgBuyPrice = 0; // متوسط سعر الشراء (لوقف الخسارة)
   const trades: BacktestTrade[] = [];
   const equityCurve: number[] = [initialCapital];
-  let lastTradeDay = -999; // فترة انتظار بين الصفقات
-  const cooldownDays = 5;  // انتظار 5 أيام على الأقل بين الصفقات
+  let lastTradeDay = -999;
+  const cooldownDays = 5;
 
   for (let i = lookback; i < prices.length; i++) {
     const window = prices.slice(Math.max(0, i - lookback), i);
+    const allPricesSoFar = prices.slice(0, i + 1);
     const cp = prices[i];
     const ret = calculateReturns(window);
     const er = expectedReturn(ret, tradingDaysPerYear);
@@ -443,28 +644,93 @@ export function runBacktest(
     const ts = calculateTrendStrength(cp, ma);
     const zAdj = calculateZScoreAdj(zScore, ts);
     const trend = calculateTrend(cp, ma);
-    const rsi = calculateRSI(prices.slice(0, i + 1), settings.rsiPeriod);
+    const rsi = calculateRSI(allPricesSoFar, settings.rsiPeriod);
     const rsiSig = rsiToSignal(rsi);
-    const mom = calculateMomentum(prices.slice(0, i + 1), settings.momentumPeriod);
-    const macdRes = calculateMACD(prices.slice(0, i + 1), settings.macdFast, settings.macdSlow, settings.macdSignal);
+    const mom = calculateMomentum(allPricesSoFar, settings.momentumPeriod);
+    const macdRes = calculateMACD(allPricesSoFar, settings.macdFast, settings.macdSlow, settings.macdSignal);
     const macdSig = macdToSignal(macdRes.histogram, cp);
     const lowVolSig = lowVolatilitySignal(v);
 
-    const os = computeOptimumScore(shr, zAdj, trend, rsiSig, mom, macdSig, lowVolSig, cost, settings);
+    // كشف نوع السوق
+    const adx = calculateADX(allPricesSoFar, settings.adxPeriod);
+    const regime = detectMarketRegime(allPricesSoFar, settings.adxThreshold, Math.min(settings.maPeriod, allPricesSoFar.length - 1));
+    const bb = calculateBollingerBands(allPricesSoFar, settings.bollingerPeriod, settings.bollingerStdDev);
+
+    // أوزان حسب نوع السوق
+    const effSettings = regime === 'ranging' ? {
+      ...settings,
+      alpha: settings.rangingAlpha, beta: settings.rangingBeta, delta: settings.rangingDelta,
+      epsilon: settings.rangingEpsilon, zeta: settings.rangingZeta, eta: settings.rangingEta,
+      theta: settings.rangingTheta, gamma: settings.rangingGamma,
+    } : settings;
+
+    // في السوق المتذبذب: عكس الاتجاه والزخم وMACD (mean-reversion)
+    const effTrend = regime === 'ranging' ? -trend : trend;
+    const effMom = regime === 'ranging' ? -mom : mom;
+    const effMacd = regime === 'ranging' ? -macdSig : macdSig;
+
+    const os = computeOptimumScore(shr, zAdj, effTrend, rsiSig, effMom, effMacd, lowVolSig, cost, effSettings);
+    const bTh = regime === 'ranging' ? settings.rangingBuyThreshold : buyThreshold;
+    const sTh = regime === 'ranging' ? settings.rangingSellThreshold : sellThreshold;
 
     const daysSinceLastTrade = i - lastTradeDay;
 
-    // شراء: OS مرتفع + اتجاه غير هابط + RSI مناسب + cooldown
-    if (os >= buyThreshold && trend >= 0 && rsiSig >= -0.5 && cash > 0 && daysSinceLastTrade >= cooldownDays) {
-      const invest = cash * backtestBuyRatio;
-      const qty = invest / cp;
-      cash -= invest + invest * cost;
-      holdings += qty;
-      trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os });
-      lastTradeDay = i;
+    // 0. وقف خسارة ثابت
+    if (settings.hardStopLossEnabled && holdings > 0 && avgBuyPrice > 0) {
+      const loss = (avgBuyPrice - cp) / avgBuyPrice;
+      if (loss >= settings.hardStopLossPercent) {
+        const val = holdings * cp;
+        cash += val - val * cost;
+        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os });
+        holdings = 0; avgBuyPrice = 0; lastTradeDay = i;
+        equityCurve.push(cash);
+        continue;
+      }
     }
-    // بيع: OS منخفض + اتجاه غير صاعد + RSI مناسب + cooldown
-    else if (os <= sellThreshold && trend <= 0 && rsiSig <= 0.5 && holdings > 0 && daysSinceLastTrade >= cooldownDays) {
+
+    let traded = false;
+
+    if (regime === 'trending') {
+      // === سوق ذو اتجاه ===
+      if (os >= bTh && trend >= 0 && rsiSig >= -0.5 && cash > 0 && daysSinceLastTrade >= cooldownDays) {
+        const invest = cash * backtestBuyRatio;
+        const qty = invest / cp;
+        avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
+        cash -= invest + invest * cost;
+        holdings += qty;
+        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os });
+        lastTradeDay = i; traded = true;
+      } else if (os <= sTh && trend <= 0 && rsiSig <= 0.5 && holdings > 0 && daysSinceLastTrade >= cooldownDays) {
+        const qty = holdings * backtestSellRatio;
+        const val = qty * cp;
+        cash += val - val * cost; holdings -= qty;
+        trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex: i, os });
+        lastTradeDay = i; traded = true;
+      }
+    } else {
+      // === سوق متذبذب: شراء عند الدعم، بيع عند المقاومة ===
+      const nearSupport = bb.percentB < 0.2 || zAdj < -1.5;
+      const nearResistance = bb.percentB > 0.8 || zAdj > 1.5;
+
+      if (os >= bTh && nearSupport && cash > 0 && daysSinceLastTrade >= cooldownDays) {
+        const invest = cash * backtestBuyRatio;
+        const qty = invest / cp;
+        avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
+        cash -= invest + invest * cost;
+        holdings += qty;
+        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os });
+        lastTradeDay = i; traded = true;
+      } else if (os <= sTh && nearResistance && holdings > 0 && daysSinceLastTrade >= cooldownDays) {
+        const qty = holdings * backtestSellRatio;
+        const val = qty * cp;
+        cash += val - val * cost; holdings -= qty;
+        trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex: i, os });
+        lastTradeDay = i; traded = true;
+      }
+    }
+
+    if (!traded && holdings > 0 && false) { // placeholder for future logic
+      // reserved
       const qty = holdings * backtestSellRatio;
       const val = qty * cp;
       cash += val - val * cost;

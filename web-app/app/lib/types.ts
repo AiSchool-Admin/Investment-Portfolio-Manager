@@ -49,6 +49,9 @@ export interface TradingSignal {
     macd: number;         // -1 to +1
     lowVolSignal: number; // -1 to +1 (تقلب منخفض = إيجابي)
     ma50: number;         // قيمة المتوسط المتحرك
+    adx: number;          // قوة الاتجاه (0-100)
+    regime: string;       // 'trending' أو 'ranging'
+    bollingerPercentB: number; // موقع السعر في نطاق Bollinger (0-1)
   };
 
   expectedReturn: number;
@@ -170,6 +173,28 @@ export interface SystemSettings {
   macdFast: number;        // MACD الخط السريع
   macdSlow: number;        // MACD الخط البطيء
   macdSignal: number;      // MACD خط الإشارة
+  adxPeriod: number;       // فترة ADX
+  adxThreshold: number;    // عتبة ADX (< هذا = متذبذب)
+  bollingerPeriod: number; // فترة Bollinger Bands
+  bollingerStdDev: number; // عدد الانحرافات المعيارية
+
+  // === أوزان الوضع المتذبذب (عندما ADX < العتبة) ===
+  rangingAlpha: number;    // Sharpe في المتذبذب
+  rangingBeta: number;     // Z_adj في المتذبذب
+  rangingDelta: number;    // Trend في المتذبذب
+  rangingEpsilon: number;  // RSI في المتذبذب
+  rangingZeta: number;     // Momentum في المتذبذب
+  rangingEta: number;      // MACD في المتذبذب
+  rangingTheta: number;    // LowVol في المتذبذب
+  rangingGamma: number;    // Cost في المتذبذب
+
+  // === عتبات الوضع المتذبذب ===
+  rangingBuyThreshold: number;   // عتبة شراء في المتذبذب (أقل من العادي)
+  rangingSellThreshold: number;  // عتبة بيع في المتذبذب (أعلى من العادي)
+
+  // === وقف خسارة ثابت ===
+  hardStopLossEnabled: boolean;
+  hardStopLossPercent: number;   // نسبة وقف الخسارة من سعر الشراء
 
   // === Trailing Stop ===
   trailingStopEnabled: boolean;
@@ -252,6 +277,26 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   macdFast: 12,
   macdSlow: 26,
   macdSignal: 9,
+  adxPeriod: 14,
+  adxThreshold: 20,
+  bollingerPeriod: 20,
+  bollingerStdDev: 2,
+
+  // أوزان الوضع المتذبذب
+  rangingAlpha: 0.10,
+  rangingBeta: 0.30,
+  rangingDelta: 0.05,
+  rangingEpsilon: 0.20,
+  rangingZeta: 0.10,
+  rangingEta: 0.10,
+  rangingTheta: 0.05,
+  rangingGamma: 0.10,
+
+  rangingBuyThreshold: 0.55,
+  rangingSellThreshold: 0.45,
+
+  hardStopLossEnabled: true,
+  hardStopLossPercent: 0.05,
 
   trailingStopEnabled: true,
   trailingStopProfitTrigger: 0.20,
