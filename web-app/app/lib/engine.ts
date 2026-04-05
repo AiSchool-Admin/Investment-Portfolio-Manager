@@ -520,17 +520,26 @@ export function analyzeAsset(
     suggestedValue = order.value;
   }
 
-  // 3. شراء عند الخوف الشديد (المبدأ الأساسي)
-  //    OS مرتفع + (سعر منخفض جداً أو RSI منخفض) = فرصة شراء
+  // 3. شراء - طريقتان:
+  //    أ) Mean Reversion: خوف شديد (Z منخفض، RSI منخفض، Bollinger منخفض)
+  //    ب) Trend Following: اتجاه صاعد قوي ومستمر (للأصول الصاعدة بثبات)
   if (signalType === 'none') {
-    const deepValue = zScoreAdj < -1.5;      // سعر أقل بكثير من المتوسط
-    const oversold = rsi < 30;                // تشبع بيعي
-    const nearBollingerLow = bb.percentB < 0.15; // قرب الحد السفلي
+    const deepValue = zScoreAdj < -1.5;
+    const oversold = rsi < 30;
+    const nearBollingerLow = bb.percentB < 0.15;
     const strongOS = os >= s.buyThreshold;
 
-    if (strongOS && (deepValue || oversold || nearBollingerLow)) {
+    // اتجاه صاعد قوي: فوق MA + شارب إيجابي + زخم إيجابي
+    const strongUptrend = trend > 0 && shr > 0.5 && momentum > 0 && adx >= 20;
+
+    if (strongOS && (deepValue || oversold || nearBollingerLow || strongUptrend)) {
       signalType = 'buy';
-      reasons.push(`OS ${(os * 100).toFixed(0)}% ≥ ${(s.buyThreshold * 100).toFixed(0)}% [${regime}]`);
+      if (strongUptrend && !deepValue && !oversold && !nearBollingerLow) {
+        reasons.push(`OS ${(os * 100).toFixed(0)}% + اتجاه صاعد قوي (Sharpe ${shr.toFixed(2)}, ADX ${adx.toFixed(0)})`);
+        reasons.push(`شراء اتباع الاتجاه (Trend Following)`);
+      } else {
+        reasons.push(`OS ${(os * 100).toFixed(0)}% ≥ ${(s.buyThreshold * 100).toFixed(0)}% [${regime}]`);
+      }
       if (deepValue) reasons.push(`Z_adj ${zScoreAdj.toFixed(2)} ← سعر أقل بكثير من المتوسط (فرصة)`);
       if (oversold) reasons.push(`RSI ${rsi.toFixed(0)} ← تشبع بيعي شديد`);
       if (nearBollingerLow) reasons.push(`Bollinger ${(bb.percentB * 100).toFixed(0)}% ← قرب الدعم`);
@@ -723,12 +732,13 @@ export function runBacktest(
     }
 
     if (!traded) {
-      // 2. شراء عند الخوف (Z منخفض أو RSI منخفض أو Bollinger منخفض)
+      // 2. شراء: mean-reversion أو trend-following
       const deepValue = zAdj < -1.5;
       const oversold = rsi < 30;
       const nearBBLow = bb.percentB < 0.15;
+      const strongUptrend = trend > 0 && shr > 0.5 && mom > 0 && adx >= 20;
 
-      if (os >= bTh && (deepValue || oversold || nearBBLow) && cash > 0 && daysSinceLastTrade >= cooldownDays) {
+      if (os >= bTh && (deepValue || oversold || nearBBLow || strongUptrend) && cash > 0 && daysSinceLastTrade >= cooldownDays) {
         const invest = cash * backtestBuyRatio;
         const qty = invest / cp;
         avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
