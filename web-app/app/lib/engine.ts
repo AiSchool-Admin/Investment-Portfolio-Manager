@@ -46,11 +46,18 @@ export function calculateMA(prices: number[], period: number): number {
 export function calculateTrendStrength(currentPrice: number, ma: number): number {
   if (ma === 0) return 0;
   const raw = (currentPrice - ma) / ma;
-  return Math.max(0, Math.min(1, raw)); // مقيد بين 0 و 1
+  // تضخيم: ×5 لجعل انحرافات صغيرة (3%) تعطي تأثير كبير (15%)
+  return Math.max(0, Math.min(1, raw * 5));
 }
 
 export function calculateZScoreAdj(zScore: number, trendStrength: number): number {
-  return zScore * (1 - trendStrength);
+  // في الاتجاه الصاعد القوي: Z-Score الإيجابي يُخفَّض بشكل كبير
+  // trendStrength = 0.5 → Z يُخفَّض 50%
+  // trendStrength = 1.0 → Z يُخفَّض 100% (يصبح صفر)
+  const dampened = zScore * (1 - trendStrength);
+  // لا نسمح لـ Z_adj أن يكون أكثر من 1.5 في الاتجاه الصاعد
+  if (trendStrength > 0.2 && dampened > 1.5) return 1.5;
+  return dampened;
 }
 
 export function calculateTrend(currentPrice: number, ma: number): number {
@@ -476,11 +483,14 @@ export function analyzeAsset(
   let suggestedQuantity = 0, suggestedValue = 0;
   const reasons: string[] = [];
 
-  // 0. وقف خسارة ثابت (Hard Stop Loss)
-  if (s.hardStopLossEnabled && lossPct >= s.hardStopLossPercent && quantityHeld > 0) {
+  // 0. وقف خسارة ديناميكي (حسب نوع السوق)
+  const dynamicStopLoss = regime === 'ranging'
+    ? Math.max(s.hardStopLossPercent * 2, vol / Math.sqrt(s.tradingDaysPerYear) * 5)
+    : s.hardStopLossPercent;
+  if (s.hardStopLossEnabled && lossPct >= dynamicStopLoss && quantityHeld > 0) {
     signalType = 'sell';
     signalSource = 'trailing_stop';
-    reasons.push(`وقف خسارة: انخفض ${(lossPct * 100).toFixed(1)}% عن سعر الشراء (حد ${(s.hardStopLossPercent * 100).toFixed(0)}%)`);
+    reasons.push(`وقف خسارة: انخفض ${(lossPct * 100).toFixed(1)}% (حد ${(dynamicStopLoss * 100).toFixed(0)}% - ${regime === 'ranging' ? 'ديناميكي' : 'ثابت'})`);
     const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, 'all');
     suggestedQuantity = order.quantity;
     suggestedValue = order.value;
@@ -675,10 +685,15 @@ export function runBacktest(
 
     const daysSinceLastTrade = i - lastTradeDay;
 
-    // 0. وقف خسارة ثابت
+    // 0. وقف خسارة ديناميكي (حسب التقلب ونوع السوق)
     if (settings.hardStopLossEnabled && holdings > 0 && avgBuyPrice > 0) {
       const loss = (avgBuyPrice - cp) / avgBuyPrice;
-      if (loss >= settings.hardStopLossPercent) {
+      // في المتذبذب: وقف خسارة أوسع (2× التقلب اليومي أو 10% أيهما أكبر)
+      const dailyVol = v / Math.sqrt(tradingDaysPerYear);
+      const dynamicStopLoss = regime === 'ranging'
+        ? Math.max(settings.hardStopLossPercent * 2, dailyVol * 5)
+        : settings.hardStopLossPercent;
+      if (loss >= dynamicStopLoss) {
         const val = holdings * cp;
         cash += val - val * cost;
         trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os });
