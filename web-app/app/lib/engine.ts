@@ -132,6 +132,52 @@ export function macdToSignal(histogram: number, currentPrice: number): number {
   return Math.max(-1, Math.min(1, normalized * 10));
 }
 
+// عامل التقلب المنخفض: الأصول المستقرة تحصل على قيمة أعلى
+// تقلب < 10% → +1 (ممتاز)، تقلب > 40% → -1 (خطر)
+export function lowVolatilitySignal(vol: number): number {
+  if (vol <= 0) return 0;
+  // عكسي: تقلب منخفض = إيجابي
+  const targetVol = 0.15; // التقلب المرجعي
+  const signal = (targetVol - vol) / targetVol;
+  return Math.max(-1, Math.min(1, signal));
+}
+
+// مصفوفة الارتباط بين أصلين
+export function correlation(returns1: number[], returns2: number[]): number {
+  const n = Math.min(returns1.length, returns2.length);
+  if (n < 5) return 0;
+  const r1 = returns1.slice(-n), r2 = returns2.slice(-n);
+  const m1 = mean(r1), m2 = mean(r2);
+  let cov = 0, var1 = 0, var2 = 0;
+  for (let i = 0; i < n; i++) {
+    cov += (r1[i] - m1) * (r2[i] - m2);
+    var1 += (r1[i] - m1) ** 2;
+    var2 += (r2[i] - m2) ** 2;
+  }
+  const denom = Math.sqrt(var1 * var2);
+  return denom === 0 ? 0 : cov / denom;
+}
+
+// VaR 95% (Parametric) - أقصى خسارة متوقعة في يوم بثقة 95%
+export function valueAtRisk95(portfolioValue: number, portfolioVol: number): number {
+  const z95 = 1.645; // Z-score for 95% confidence
+  const dailyVol = portfolioVol / Math.sqrt(252);
+  return portfolioValue * dailyVol * z95;
+}
+
+// أقصى انخفاض من القمة (Max Drawdown)
+export function maxDrawdown(equityCurve: number[]): number {
+  if (equityCurve.length < 2) return 0;
+  let peak = equityCurve[0];
+  let maxDD = 0;
+  for (const val of equityCurve) {
+    if (val > peak) peak = val;
+    const dd = (peak - val) / peak;
+    if (dd > maxDD) maxDD = dd;
+  }
+  return maxDD;
+}
+
 export function expectedReturn(returns: number[], tradingDays = 252): number {
   if (returns.length === 0) return 0;
   return mean(returns) * tradingDays;
@@ -152,7 +198,7 @@ export function sharpeRatio(expRet: number, rf: number, vol: number): number {
 export function computeOptimumScore(
   sharpe: number, zScoreAdj: number, trend: number,
   rsiSignal: number, momentum: number, macdSignal: number,
-  cost: number, s: SystemSettings,
+  lowVolSig: number, cost: number, s: SystemSettings,
 ): number {
   const osRaw = s.alpha * sharpe
     + s.beta * (-zScoreAdj)
@@ -160,6 +206,7 @@ export function computeOptimumScore(
     + s.epsilon * rsiSignal
     + s.zeta * momentum
     + s.eta * macdSignal
+    + s.theta * lowVolSig
     - s.gamma * cost;
 
   // تطبيع باستخدام Sigmoid
@@ -172,6 +219,7 @@ export function calculateConfidence(
   signalType: 'buy' | 'sell' | 'none',
   sharpe: number, zScoreAdj: number, trend: number,
   rsiSignal: number, momentum: number, macdSignal: number,
+  lowVolSig: number,
 ): number {
   if (signalType === 'none') return 0;
 
@@ -182,6 +230,7 @@ export function calculateConfidence(
     signalType === 'buy' ? rsiSignal > 0 : rsiSignal < 0,
     signalType === 'buy' ? momentum > 0 : momentum < 0,
     signalType === 'buy' ? macdSignal > 0 : macdSignal < 0,
+    lowVolSig > 0, // تقلب منخفض يدعم كلا الاتجاهين (أصل مستقر)
   ];
 
   return factors.filter(Boolean).length / factors.length;
@@ -246,9 +295,10 @@ export function analyzeAsset(
   const macdResult = calculateMACD(historicalPrices, s.macdFast, s.macdSlow, s.macdSignal);
   const macdSig = macdToSignal(macdResult.histogram, currentPrice);
   const shr = sharpeRatio(expRet, s.riskFreeRate, vol);
+  const lowVolSig = lowVolatilitySignal(vol);
 
   // حساب OS
-  const os = computeOptimumScore(shr, zScoreAdj, trend, rsiSig, momentum, macdSig, s.transactionCost, s);
+  const os = computeOptimumScore(shr, zScoreAdj, trend, rsiSig, momentum, macdSig, lowVolSig, s.transactionCost, s);
 
   // الأوزان
   const currentValue = quantityHeld * currentPrice;
@@ -305,13 +355,13 @@ export function analyzeAsset(
   }
 
   // درجة الثقة
-  const confidence = calculateConfidence(signalType, shr, zScoreAdj, trend, rsiSig, momentum, macdSig);
+  const confidence = calculateConfidence(signalType, shr, zScoreAdj, trend, rsiSig, momentum, macdSig, lowVolSig);
 
   return {
     assetName, assetId, signalType, signalSource, optimumScore: os, confidence,
     factors: {
       sharpe: shr, zScore, zScoreAdj, trend, trendStrength,
-      rsi, rsiSignal: rsiSig, momentum, macd: macdSig, ma50: ma,
+      rsi, rsiSignal: rsiSig, momentum, macd: macdSig, lowVolSignal: lowVolSig, ma50: ma,
     },
     expectedReturn: expRet, volatility: vol, currentPrice,
     currentWeight, targetWeight, suggestedQuantity, suggestedValue, reasons,
@@ -396,8 +446,9 @@ export function runBacktest(
     const mom = calculateMomentum(prices.slice(0, i + 1), settings.momentumPeriod);
     const macdRes = calculateMACD(prices.slice(0, i + 1), settings.macdFast, settings.macdSlow, settings.macdSignal);
     const macdSig = macdToSignal(macdRes.histogram, cp);
+    const lowVolSig = lowVolatilitySignal(v);
 
-    const os = computeOptimumScore(shr, zAdj, trend, rsiSig, mom, macdSig, cost, settings);
+    const os = computeOptimumScore(shr, zAdj, trend, rsiSig, mom, macdSig, lowVolSig, cost, settings);
 
     if (os >= buyThreshold && trend >= 0 && rsiSig >= -0.5 && cash > 0) {
       const invest = cash * backtestBuyRatio;

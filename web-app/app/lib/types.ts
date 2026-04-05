@@ -47,6 +47,7 @@ export interface TradingSignal {
     rsiSignal: number;    // -1 to +1
     momentum: number;     // -1 to +1
     macd: number;         // -1 to +1
+    lowVolSignal: number; // -1 to +1 (تقلب منخفض = إيجابي)
     ma50: number;         // قيمة المتوسط المتحرك
   };
 
@@ -112,6 +113,23 @@ export interface BacktestTrade {
   os: number;
 }
 
+// ============ مخاطر المحفظة ============
+
+export interface PortfolioRiskMetrics {
+  totalValue: number;
+  totalPL: number;
+  totalPLPercent: number;
+  portfolioVolatility: number;     // تقلب المحفظة السنوي
+  valueAtRisk95: number;           // VaR 95% (أقصى خسارة متوقعة في يوم)
+  maxDrawdown: number;             // أقصى انخفاض من القمة
+  currentDrawdown: number;         // الانخفاض الحالي من القمة
+  drawdownAlert: boolean;          // تحذير إذا تجاوز العتبة
+  sharpePortfolio: number;         // شارب المحفظة ككل
+  diversificationScore: number;    // درجة التنويع (0-1)
+  correlationWarnings: string[];   // تحذيرات ارتباط عالي
+  assetCorrelations: { asset1: string; asset2: string; correlation: number }[];
+}
+
 export interface RebalanceItem {
   assetName: string;
   currentWeight: number;
@@ -129,6 +147,7 @@ export interface SystemSettings {
   epsilon: number;        // وزن RSI
   zeta: number;           // وزن الزخم (Momentum)
   eta: number;            // وزن MACD
+  theta: number;          // وزن التقلب المنخفض (Low Volatility)
   gamma: number;          // وزن تكلفة المعاملات
 
   // === معاملات أساسية ===
@@ -157,6 +176,10 @@ export interface SystemSettings {
   trailingStopProfitTrigger: number; // نسبة الربح التي تفعّل الـ trailing stop
   trailingStopDistance: number;      // المسافة من أعلى سعر
 
+  // === Drawdown Protection ===
+  drawdownProtectionEnabled: boolean;
+  maxDrawdownThreshold: number;  // عتبة أقصى انخفاض للمحفظة (مثلاً 0.15 = 15%)
+
   // === باك تيست ===
   backtestLookback: number;
   backtestBuyRatio: number;
@@ -182,6 +205,7 @@ export interface AssetSettings {
   epsilon?: number;
   zeta?: number;
   eta?: number;
+  theta?: number;
   gamma?: number;
   sigmoidK?: number;
   buyThreshold?: number;
@@ -203,13 +227,14 @@ export interface AssetSettings {
 // القيم الافتراضية لإعدادات النظام (نمط متوازن)
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   // أوزان OS (المجموع = 1.0)
-  alpha: 0.20,    // Sharpe
-  beta: 0.20,     // Z_adj
+  alpha: 0.18,    // Sharpe
+  beta: 0.17,     // Z_adj
   delta: 0.15,    // Trend
-  epsilon: 0.15,  // RSI
+  epsilon: 0.13,  // RSI
   zeta: 0.10,     // Momentum
-  eta: 0.10,      // MACD
-  gamma: 0.10,    // Cost
+  eta: 0.08,      // MACD
+  theta: 0.10,    // Low Volatility
+  gamma: 0.09,    // Cost
 
   riskFreeRate: 0.03,
   transactionCost: 0.001,
@@ -232,6 +257,9 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   trailingStopProfitTrigger: 0.20,
   trailingStopDistance: 0.10,
 
+  drawdownProtectionEnabled: true,
+  maxDrawdownThreshold: 0.15,
+
   backtestLookback: 50,
   backtestBuyRatio: 0.3,
   backtestSellRatio: 0.5,
@@ -245,10 +273,10 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
 
 // أنماط المعاملات المسبقة حسب نمط المستثمر
 export const PROFILE_PRESETS: Record<string, Partial<SystemSettings>> = {
-  aggressive: { alpha: 0.15, beta: 0.30, delta: 0.25, epsilon: 0.15, zeta: 0.10, eta: 0.00, gamma: 0.05 },
-  balanced: { alpha: 0.20, beta: 0.20, delta: 0.15, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.10 },
-  income: { alpha: 0.30, beta: 0.15, delta: 0.15, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05 },
-  capital_preservation: { alpha: 0.40, beta: 0.15, delta: 0.15, epsilon: 0.15, zeta: 0.10, eta: 0.00, gamma: 0.05 },
+  aggressive: { alpha: 0.12, beta: 0.25, delta: 0.22, epsilon: 0.13, zeta: 0.10, eta: 0.05, theta: 0.05, gamma: 0.08 },
+  balanced: { alpha: 0.18, beta: 0.17, delta: 0.15, epsilon: 0.13, zeta: 0.10, eta: 0.08, theta: 0.10, gamma: 0.09 },
+  income: { alpha: 0.25, beta: 0.12, delta: 0.12, epsilon: 0.12, zeta: 0.08, eta: 0.08, theta: 0.15, gamma: 0.08 },
+  capital_preservation: { alpha: 0.30, beta: 0.10, delta: 0.10, epsilon: 0.10, zeta: 0.05, eta: 0.05, theta: 0.22, gamma: 0.08 },
 };
 
 // ============ الضبط المثالي لكل فئة أصل ============
@@ -257,7 +285,7 @@ export const PROFILE_PRESETS: Record<string, Partial<SystemSettings>> = {
 export interface AssetClassConfig {
   // أوزان OS
   alpha: number; beta: number; delta: number; epsilon: number;
-  zeta: number; eta: number; gamma: number;
+  zeta: number; eta: number; theta: number; gamma: number;
   // مؤشرات
   maPeriod: number;
   rsiPeriod: number;
@@ -282,7 +310,7 @@ export interface AssetClassConfig {
 export const ASSET_CLASS_DEFAULTS: Record<string, AssetClassConfig> = {
   // === الأسهم ===
   EQ: {
-    alpha: 0.25, beta: 0.20, delta: 0.20, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05,
+    alpha: 0.22, beta: 0.17, delta: 0.17, epsilon: 0.13, zeta: 0.08, eta: 0.08, theta: 0.08, gamma: 0.07,
     maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70,
     momentumPeriod: 10, macdFast: 12, macdSlow: 26, macdSignal: 9,
     zScoreStrongBuy: -2, zScoreStrongSell: 2,
@@ -292,7 +320,7 @@ export const ASSET_CLASS_DEFAULTS: Record<string, AssetClassConfig> = {
   },
   // === الدخل الثابت ===
   FI: {
-    alpha: 0.35, beta: 0.15, delta: 0.20, epsilon: 0.10, zeta: 0.10, eta: 0.10, gamma: 0.05,
+    alpha: 0.28, beta: 0.12, delta: 0.15, epsilon: 0.08, zeta: 0.08, eta: 0.08, theta: 0.15, gamma: 0.06,
     maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70,
     momentumPeriod: 10, macdFast: 12, macdSlow: 26, macdSignal: 9,
     zScoreStrongBuy: -1.5, zScoreStrongSell: 1.5,
@@ -302,7 +330,7 @@ export const ASSET_CLASS_DEFAULTS: Record<string, AssetClassConfig> = {
   },
   // === السلع والمعادن الثمينة ===
   CM: {
-    alpha: 0.20, beta: 0.25, delta: 0.20, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05,
+    alpha: 0.17, beta: 0.22, delta: 0.17, epsilon: 0.12, zeta: 0.08, eta: 0.08, theta: 0.08, gamma: 0.08,
     maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 25, rsiSellThreshold: 75,
     momentumPeriod: 10, macdFast: 12, macdSlow: 26, macdSignal: 9,
     zScoreStrongBuy: -2.5, zScoreStrongSell: 2.5,
@@ -312,7 +340,7 @@ export const ASSET_CLASS_DEFAULTS: Record<string, AssetClassConfig> = {
   },
   // === العقارات ===
   RE: {
-    alpha: 0.30, beta: 0.15, delta: 0.20, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05,
+    alpha: 0.25, beta: 0.12, delta: 0.15, epsilon: 0.12, zeta: 0.08, eta: 0.08, theta: 0.12, gamma: 0.08,
     maPeriod: 100, rsiPeriod: 20, rsiBuyThreshold: 30, rsiSellThreshold: 70,
     momentumPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9,
     zScoreStrongBuy: -2, zScoreStrongSell: 2,
@@ -322,7 +350,7 @@ export const ASSET_CLASS_DEFAULTS: Record<string, AssetClassConfig> = {
   },
   // === النقد وما يعادله ===
   CS: {
-    alpha: 0.50, beta: 0.05, delta: 0.10, epsilon: 0.05, zeta: 0.05, eta: 0.05, gamma: 0.20,
+    alpha: 0.35, beta: 0.05, delta: 0.05, epsilon: 0.05, zeta: 0.03, eta: 0.03, theta: 0.25, gamma: 0.19,
     maPeriod: 20, rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70,
     momentumPeriod: 5, macdFast: 12, macdSlow: 26, macdSignal: 9,
     zScoreStrongBuy: -1, zScoreStrongSell: 1,
@@ -332,7 +360,7 @@ export const ASSET_CLASS_DEFAULTS: Record<string, AssetClassConfig> = {
   },
   // === رأس المال الجريء ===
   VC: {
-    alpha: 0.15, beta: 0.30, delta: 0.15, epsilon: 0.10, zeta: 0.10, eta: 0.10, gamma: 0.10,
+    alpha: 0.12, beta: 0.25, delta: 0.12, epsilon: 0.08, zeta: 0.08, eta: 0.08, theta: 0.15, gamma: 0.12,
     maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70,
     momentumPeriod: 10, macdFast: 12, macdSlow: 26, macdSignal: 9,
     zScoreStrongBuy: -2, zScoreStrongSell: 2,
@@ -342,7 +370,7 @@ export const ASSET_CLASS_DEFAULTS: Record<string, AssetClassConfig> = {
   },
   // === الأسهم الخاصة ===
   PE: {
-    alpha: 0.20, beta: 0.25, delta: 0.15, epsilon: 0.10, zeta: 0.10, eta: 0.10, gamma: 0.10,
+    alpha: 0.17, beta: 0.20, delta: 0.12, epsilon: 0.08, zeta: 0.08, eta: 0.08, theta: 0.15, gamma: 0.12,
     maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70,
     momentumPeriod: 10, macdFast: 12, macdSlow: 26, macdSignal: 9,
     zScoreStrongBuy: -2, zScoreStrongSell: 2,
@@ -352,7 +380,7 @@ export const ASSET_CLASS_DEFAULTS: Record<string, AssetClassConfig> = {
   },
   // === العملات الرقمية ===
   CR: {
-    alpha: 0.10, beta: 0.35, delta: 0.20, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05,
+    alpha: 0.08, beta: 0.30, delta: 0.17, epsilon: 0.12, zeta: 0.10, eta: 0.08, theta: 0.05, gamma: 0.10,
     maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 20, rsiSellThreshold: 80,
     momentumPeriod: 7, macdFast: 12, macdSlow: 26, macdSignal: 9,
     zScoreStrongBuy: -3, zScoreStrongSell: 3,
@@ -409,6 +437,7 @@ export const SETTINGS_META: SettingMeta[] = [
   { key: 'epsilon', label: 'ε وزن RSI', description: 'وزن مؤشر القوة النسبية (تشبع بيعي/شرائي)', min: 0, max: 0.5, step: 0.05, unit: '', group: 'أوزان محرك OS' },
   { key: 'zeta', label: 'ζ وزن الزخم', description: 'وزن معدل تغير السعر (Momentum)', min: 0, max: 0.5, step: 0.05, unit: '', group: 'أوزان محرك OS' },
   { key: 'eta', label: 'η وزن MACD', description: 'وزن مؤشر MACD (تقاطع المتوسطات)', min: 0, max: 0.5, step: 0.05, unit: '', group: 'أوزان محرك OS' },
+  { key: 'theta', label: 'θ وزن التقلب المنخفض', description: 'يفضّل الأصول ذات التقلب المنخفض (استقرار أعلى)', min: 0, max: 0.5, step: 0.05, unit: '', group: 'أوزان محرك OS' },
   { key: 'gamma', label: 'γ وزن التكلفة', description: 'وزن تكلفة المعاملات', min: 0, max: 0.3, step: 0.05, unit: '', group: 'أوزان محرك OS' },
 
   // معاملات أساسية
@@ -435,6 +464,7 @@ export const SETTINGS_META: SettingMeta[] = [
   // Trailing Stop
   { key: 'trailingStopProfitTrigger', label: 'تفعيل Trailing Stop', description: 'نسبة الربح غير المحقق التي تفعّل وقف الخسارة المتحرك', min: 0.05, max: 0.50, step: 0.05, unit: '%', group: 'وقف الخسارة المتحرك' },
   { key: 'trailingStopDistance', label: 'مسافة Trailing Stop', description: 'نسبة الانخفاض من أعلى سعر التي تطلق إشارة بيع', min: 0.03, max: 0.25, step: 0.01, unit: '%', group: 'وقف الخسارة المتحرك' },
+  { key: 'maxDrawdownThreshold', label: 'حماية الانهيار', description: 'عند انخفاض المحفظة أكثر من هذه النسبة → تنبيه وتوصية بتقليص المخاطر', min: 0.05, max: 0.40, step: 0.05, unit: '%', group: 'حماية المحفظة' },
 
   // حجم الصفقة
   { key: 'buyOrderCashRatio', label: 'نسبة النقد للشراء', description: 'نسبة النقد المتاح المستخدم في كل أمر شراء', min: 0.05, max: 1, step: 0.05, unit: '%', group: 'حجم الصفقة' },

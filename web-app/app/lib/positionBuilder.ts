@@ -4,7 +4,7 @@
  */
 
 import { PositionBuildingPlan, Tranche, TrancheNotification, SystemSettings, DEFAULT_SYSTEM_SETTINGS } from './types';
-import { mean, standardDeviation, calculateReturns, expectedReturn, volatility, calculateZScore, calculateMA, calculateTrendStrength, calculateZScoreAdj, calculateTrend, calculateRSI, rsiToSignal, calculateMomentum, calculateMACD, macdToSignal, sharpeRatio, computeOptimumScore } from './engine';
+import { mean, standardDeviation, calculateReturns, expectedReturn, volatility, calculateZScore, calculateMA, calculateTrendStrength, calculateZScoreAdj, calculateTrend, calculateRSI, rsiToSignal, calculateMomentum, calculateMACD, macdToSignal, sharpeRatio, computeOptimumScore, lowVolatilitySignal } from './engine';
 
 // ============ Half-Kelly Position Sizing ============
 
@@ -329,5 +329,6 @@ export function computeOSFromPrices(
   const expRet = expectedReturn(returns, s.tradingDaysPerYear);
   const vol = volatility(returns, s.tradingDaysPerYear);
   const shr = sharpeRatio(expRet, s.riskFreeRate, vol);
-  return computeOptimumScore(shr, zAdj, trend, rsiSig, mom, macdSig, s.transactionCost, s);
+  const lowVolSig = lowVolatilitySignal(vol);
+  return computeOptimumScore(shr, zAdj, trend, rsiSig, mom, macdSig, lowVolSig, s.transactionCost, s);
 }

@@ -55,6 +55,7 @@ function generateReport(s: TradingSignal): string {
   if (f.zScoreAdj < 0) buyFactors.push('سعر أقل من المتوسط'); else if (f.zScoreAdj > 0) sellFactors.push('سعر أعلى من المتوسط');
   if (f.momentum > 0) buyFactors.push('زخم إيجابي'); else if (f.momentum < 0) sellFactors.push('زخم سلبي');
   if (f.macd > 0) buyFactors.push('MACD إيجابي'); else if (f.macd < 0) sellFactors.push('MACD سلبي');
+  if (f.lowVolSignal > 0.3) buyFactors.push('أصل مستقر'); else if (f.lowVolSignal < -0.3) sellFactors.push('تقلب مرتفع');
 
   report += `── تحليل العوامل ──\n`;
   report += `عوامل تدعم الشراء (${buyFactors.length}/6): ${buyFactors.join('، ') || 'لا يوجد'}\n`;
@@ -205,13 +206,14 @@ function SignalCard({ signal: s, onClick }: { signal: TradingSignal; onClick: ()
       </div>
 
       {/* العوامل - شبكة ملونة */}
-      <div className="grid grid-cols-6 gap-1 mb-2">
+      <div className="grid grid-cols-7 gap-1 mb-2">
         <FactorMini label="شارب" value={f.sharpe} positive={f.sharpe > 0} fmt={`${f.sharpe.toFixed(1)}`} />
         <FactorMini label="الاتجاه" value={f.trend} positive={f.trend > 0} fmt={f.trend > 0 ? '↑' : f.trend < 0 ? '↓' : '→'} />
         <FactorMini label="RSI" value={f.rsi} positive={f.rsi < 40} negative={f.rsi > 60} fmt={`${f.rsi.toFixed(0)}`} />
         <FactorMini label="Z_adj" value={f.zScoreAdj} positive={f.zScoreAdj < 0} fmt={`${f.zScoreAdj.toFixed(1)}`} />
         <FactorMini label="الزخم" value={f.momentum} positive={f.momentum > 0} fmt={`${(f.momentum * 100).toFixed(0)}%`} />
         <FactorMini label="MACD" value={f.macd} positive={f.macd > 0} fmt={`${(f.macd * 100).toFixed(0)}%`} />
+        <FactorMini label="استقرار" value={f.lowVolSignal} positive={f.lowVolSignal > 0} fmt={f.lowVolSignal > 0.3 ? 'مستقر' : f.lowVolSignal < -0.3 ? 'متقلب' : 'عادي'} />
       </div>
 
       {/* التوصية المختصرة */}
@@ -220,10 +222,10 @@ function SignalCard({ signal: s, onClick }: { signal: TradingSignal; onClick: ()
         s.signalType === 'sell' ? 'bg-red-50 text-red-800' :
         'bg-gray-50 text-gray-600'
       }`}>
-        {s.signalType === 'buy' && strength.level === 3 && `إشارة شراء قوية مدعومة بـ ${Math.round(s.confidence * 6)}/6 عوامل. يُنصح بالشراء.`}
-        {s.signalType === 'buy' && strength.level === 2 && `إشارة شراء معتدلة (${Math.round(s.confidence * 6)}/6 عوامل متوافقة). شراء بحذر مع مراقبة.`}
-        {s.signalType === 'buy' && strength.level === 1 && `إشارة شراء ضعيفة (${Math.round(s.confidence * 6)}/6 عوامل). يُفضل انتظار تأكيد أقوى.`}
-        {s.signalType === 'sell' && strength.level === 3 && `إشارة بيع قوية مدعومة بـ ${Math.round(s.confidence * 6)}/6 عوامل. يُنصح بتقليص المركز.`}
+        {s.signalType === 'buy' && strength.level === 3 && `إشارة شراء قوية مدعومة بـ ${Math.round(s.confidence * 7)}/7 عوامل. يُنصح بالشراء.`}
+        {s.signalType === 'buy' && strength.level === 2 && `إشارة شراء معتدلة (${Math.round(s.confidence * 7)}/7 عوامل متوافقة). شراء بحذر مع مراقبة.`}
+        {s.signalType === 'buy' && strength.level === 1 && `إشارة شراء ضعيفة (${Math.round(s.confidence * 7)}/7 عوامل). يُفضل انتظار تأكيد أقوى.`}
+        {s.signalType === 'sell' && strength.level === 3 && `إشارة بيع قوية مدعومة بـ ${Math.round(s.confidence * 7)}/7 عوامل. يُنصح بتقليص المركز.`}
         {s.signalType === 'sell' && strength.level === 2 && `إشارة بيع معتدلة. يُنصح بجني جزء من الأرباح.`}
         {s.signalType === 'sell' && strength.level === 1 && `إشارة بيع ضعيفة. مراقبة مع وضع حد خسارة.`}
         {s.signalType === 'none' && `لا توجد إشارة واضحة. الاحتفاظ بالمركز الحالي.`}
@@ -305,6 +307,9 @@ function SignalDetail({ signal: s, onClose, onTrade }: { signal: TradingSignal; 
             <FactorRow label="MACD" value={`${(s.factors.macd * 100).toFixed(0)}%`}
               desc={s.factors.macd > 0 ? 'إيجابي' : s.factors.macd < 0 ? 'سلبي' : 'محايد'}
               positive={s.factors.macd > 0} />
+            <FactorRow label="الاستقرار" value={`${(s.factors.lowVolSignal * 100).toFixed(0)}%`}
+              desc={s.factors.lowVolSignal > 0.3 ? 'مستقر' : s.factors.lowVolSignal < -0.3 ? 'متقلب جداً' : 'تقلب عادي'}
+              positive={s.factors.lowVolSignal > 0} />
           </div>
         </div>
 

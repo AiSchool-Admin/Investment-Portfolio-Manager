@@ -298,6 +298,7 @@ export function getEffectiveSettings(assetId: string, assetCategory?: string): S
       epsilon: classDefaults.epsilon,
       zeta: classDefaults.zeta,
       eta: classDefaults.eta,
+      theta: classDefaults.theta,
       gamma: classDefaults.gamma,
       maPeriod: classDefaults.maPeriod,
       rsiPeriod: classDefaults.rsiPeriod,

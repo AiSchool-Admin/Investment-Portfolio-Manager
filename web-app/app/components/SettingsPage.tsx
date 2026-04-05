@@ -157,7 +157,7 @@ export default function SettingsPage() {
 
           {/* مجموع أوزان OS */}
           {(() => {
-            const sum = settings.alpha + settings.beta + settings.delta + settings.epsilon + settings.zeta + settings.eta + settings.gamma;
+            const sum = settings.alpha + settings.beta + settings.delta + settings.epsilon + settings.zeta + settings.eta + settings.theta + settings.gamma;
             return (
               <div className={`text-xs text-center font-bold mb-2 ${Math.abs(sum - 1) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
                 مجموع أوزان OS: {sum.toFixed(2)} {Math.abs(sum - 1) >= 0.01 && '(يجب أن يكون 1.00)'}
@@ -226,7 +226,7 @@ export default function SettingsPage() {
                   {/* معلومات الفئة */}
                   <div className="mb-3 p-2 rounded bg-blue-50 text-xs text-blue-700">
                     فئة الأصل: <b>{selectedAsset?.category}</b> → كود: <b>{classCode}</b> |
-                    الأوزان الافتراضية: α={classDefaults.alpha} β={classDefaults.beta} δ={classDefaults.delta} ε={classDefaults.epsilon} ζ={classDefaults.zeta} η={classDefaults.eta} γ={classDefaults.gamma}
+                    الأوزان: α={classDefaults.alpha} β={classDefaults.beta} δ={classDefaults.delta} ε={classDefaults.epsilon} ζ={classDefaults.zeta} η={classDefaults.eta} θ={classDefaults.theta} γ={classDefaults.gamma}
                   </div>
 
                   <div className="flex items-center justify-between mb-4">
@@ -255,6 +255,8 @@ export default function SettingsPage() {
                       step={0.05} min={0} max={0.5} onChange={(v) => handleAssetSettingChange('zeta', v)} refLabel="الفئة" />
                     <AssetSettingRow label="η وزن MACD" systemValue={classDefaults.eta} overrideValue={assetOverrides.eta}
                       step={0.05} min={0} max={0.5} onChange={(v) => handleAssetSettingChange('eta', v)} refLabel="الفئة" />
+                    <AssetSettingRow label="θ وزن الاستقرار" systemValue={classDefaults.theta} overrideValue={assetOverrides.theta}
+                      step={0.05} min={0} max={0.5} onChange={(v) => handleAssetSettingChange('theta', v)} refLabel="الفئة" />
                     <AssetSettingRow label="γ وزن التكلفة" systemValue={classDefaults.gamma} overrideValue={assetOverrides.gamma}
                       step={0.05} min={0} max={0.3} onChange={(v) => handleAssetSettingChange('gamma', v)} refLabel="الفئة" />
 
