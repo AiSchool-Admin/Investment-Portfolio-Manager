@@ -223,6 +223,67 @@ export function clearNotifications(): void {
   localStorage.removeItem(KEYS.notifications);
 }
 
+// ============ تصدير واستيراد كل البيانات ============
+
+export function exportAllData(): string {
+  const data: Record<string, unknown> = {};
+  for (const [name, key] of Object.entries(KEYS)) {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      try { data[name] = JSON.parse(raw); } catch { data[name] = raw; }
+    }
+  }
+  data._exportDate = new Date().toISOString();
+  data._version = '2.0';
+  return JSON.stringify(data, null, 2);
+}
+
+export function importAllData(json: string): { success: boolean; message: string } {
+  try {
+    const data = JSON.parse(json);
+    if (!data || typeof data !== 'object') {
+      return { success: false, message: 'ملف غير صالح' };
+    }
+    let count = 0;
+    for (const [name, key] of Object.entries(KEYS)) {
+      if (data[name] !== undefined) {
+        localStorage.setItem(key, typeof data[name] === 'string' ? data[name] as string : JSON.stringify(data[name]));
+        count++;
+      }
+    }
+    return { success: true, message: `تم استيراد ${count} مجموعة بيانات بنجاح` };
+  } catch {
+    return { success: false, message: 'خطأ في قراءة الملف - تأكد أنه ملف JSON صالح' };
+  }
+}
+
+export function downloadDataAsFile(): void {
+  const json = exportAllData();
+  const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `portfolio_backup_${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function importDataFromFile(): Promise<{ success: boolean; message: string }> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) { resolve({ success: false, message: 'لم يتم اختيار ملف' }); return; }
+      const text = await file.text();
+      const result = importAllData(text);
+      resolve(result);
+    };
+    input.click();
+  });
+}
+
 // ============ بيانات تجريبية ============
 
 export function loadSampleData(): void {

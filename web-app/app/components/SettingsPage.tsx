@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { getProfile, saveProfile, getTrades, getAssets, getSystemSettings, saveSystemSettings, resetSystemSettings, getAssetSettings, saveAssetSettings, deleteAssetSettings } from '../lib/store';
+import { getProfile, saveProfile, getTrades, getAssets, getSystemSettings, saveSystemSettings, resetSystemSettings, getAssetSettings, saveAssetSettings, deleteAssetSettings, downloadDataAsFile, importDataFromFile } from '../lib/store';
 import { PROFILE_NAMES, SystemSettings, AssetSettings, SETTINGS_META, DEFAULT_SYSTEM_SETTINGS } from '../lib/types';
 
 const SELL_MODES = [
@@ -15,7 +15,8 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState(getProfile);
   const [cash, setCash] = useState(profile?.availableCash?.toString() || '0');
   const [settings, setSettings] = useState<SystemSettings>(getSystemSettings);
-  const [activeTab, setActiveTab] = useState<'profile' | 'system' | 'assets' | 'trades' | 'about'>('system');
+  const [activeTab, setActiveTab] = useState<'profile' | 'system' | 'assets' | 'trades' | 'data' | 'about'>('system');
+  const [importStatus, setImportStatus] = useState('');
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [assetOverrides, setAssetOverrides] = useState<AssetSettings | null>(null);
   const [saved, setSaved] = useState(false);
@@ -99,6 +100,7 @@ export default function SettingsPage() {
   }
 
   const TABS = [
+    { id: 'data', label: 'نسخ احتياطي', icon: '💾' },
     { id: 'system', label: 'إعدادات النظام', icon: '🔧' },
     { id: 'assets', label: 'إعدادات الأصول', icon: '📊' },
     { id: 'profile', label: 'الملف الاستثماري', icon: '👤' },
@@ -436,6 +438,64 @@ export default function SettingsPage() {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {/* ============ نسخ احتياطي ============ */}
+      {activeTab === 'data' && (
+        <div>
+          <div className="card mb-4" style={{ background: 'var(--warning-bg)' }}>
+            <div className="flex items-start gap-2">
+              <span className="text-xl">⚠️</span>
+              <div className="text-sm">
+                <b>مهم:</b> بياناتك محفوظة في المتصفح فقط (localStorage). عند تغيير عنوان الموقع أو مسح بيانات المتصفح ستفقد بياناتك.
+                <b> احفظ نسخة احتياطية بانتظام.</b>
+              </div>
+            </div>
+          </div>
+
+          {/* تصدير */}
+          <div className="card mb-4">
+            <h2 className="font-bold text-lg mb-2">تصدير البيانات</h2>
+            <p className="text-sm text-gray-500 mb-3">حفظ جميع بياناتك (أصول، إعدادات، صفقات، خطط) في ملف JSON واحد.</p>
+            <button className="btn-primary w-full text-lg py-3" onClick={downloadDataAsFile}>
+              💾 تحميل نسخة احتياطية
+            </button>
+          </div>
+
+          {/* استيراد */}
+          <div className="card mb-4">
+            <h2 className="font-bold text-lg mb-2">استيراد البيانات</h2>
+            <p className="text-sm text-gray-500 mb-3">استعادة بياناتك من ملف نسخة احتياطية سابقة. سيتم استبدال البيانات الحالية.</p>
+            <button className="btn-outline w-full text-lg py-3" onClick={async () => {
+              const result = await importDataFromFile();
+              setImportStatus(result.message);
+              if (result.success) {
+                setProfile(getProfile());
+                setSettings(getSystemSettings());
+                showSaved();
+                setTimeout(() => window.location.reload(), 1500);
+              }
+            }}>
+              📂 استيراد من ملف
+            </button>
+            {importStatus && (
+              <div className={`text-sm text-center font-bold mt-2 ${importStatus.includes('بنجاح') ? 'text-green-600' : 'text-red-600'}`}>
+                {importStatus}
+              </div>
+            )}
+          </div>
+
+          {/* معلومات التخزين */}
+          <div className="card">
+            <h2 className="font-bold text-lg mb-2">حالة التخزين</h2>
+            <div className="text-sm space-y-1">
+              <div className="flex justify-between"><span>الأصول:</span><b>{assets.length} أصل</b></div>
+              <div className="flex justify-between"><span>الصفقات:</span><b>{trades.length} صفقة</b></div>
+              <div className="flex justify-between"><span>النقد المتاح:</span><b>${profile?.availableCash?.toFixed(2) || '0'}</b></div>
+              <div className="flex justify-between"><span>نوع التخزين:</span><b>محلي (localStorage)</b></div>
+            </div>
+          </div>
         </div>
       )}
 
