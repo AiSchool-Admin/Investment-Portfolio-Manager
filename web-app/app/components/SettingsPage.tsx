@@ -239,108 +239,71 @@ export default function SettingsPage() {
                   </div>
 
                   <p className="text-xs text-gray-400 mb-4">
-                    فعّل التخصيص لأي معامل بتغيير قيمته. القيم الفارغة تستخدم إعدادات النظام.
+                    القيم الفارغة تستخدم إعدادات الفئة ({classCode}). عدّل القيمة لتخصيص هذا الأصل فقط.
                   </p>
 
                   <div className="flex flex-col gap-4">
-                    {/* Alpha */}
-                    <AssetSettingRow
-                      label="α وزن شارب"
-                      systemValue={settings.alpha}
-                      overrideValue={assetOverrides.alpha}
-                      step={0.05} min={0} max={1}
-                      onChange={(v) => handleAssetSettingChange('alpha', v)}
-                    />
-                    {/* Beta */}
-                    <AssetSettingRow
-                      label="β وزن Z-Score"
-                      systemValue={settings.beta}
-                      overrideValue={assetOverrides.beta}
-                      step={0.05} min={0} max={1}
-                      onChange={(v) => handleAssetSettingChange('beta', v)}
-                    />
-                    {/* Gamma */}
-                    <AssetSettingRow
-                      label="γ وزن التكلفة"
-                      systemValue={settings.gamma}
-                      overrideValue={assetOverrides.gamma}
-                      step={0.05} min={0} max={1}
-                      onChange={(v) => handleAssetSettingChange('gamma', v)}
-                    />
-                    {/* Buy Threshold */}
-                    <AssetSettingRow
-                      label="عتبة الشراء"
-                      systemValue={settings.buyThreshold}
-                      overrideValue={assetOverrides.buyThreshold}
-                      step={0.05} min={0.5} max={0.95}
-                      onChange={(v) => handleAssetSettingChange('buyThreshold', v)}
-                    />
-                    {/* Sell Threshold */}
-                    <AssetSettingRow
-                      label="عتبة البيع"
-                      systemValue={settings.sellThreshold}
-                      overrideValue={assetOverrides.sellThreshold}
-                      step={0.05} min={0.05} max={0.5}
-                      onChange={(v) => handleAssetSettingChange('sellThreshold', v)}
-                    />
-                    {/* Risk Free Rate */}
-                    <AssetSettingRow
-                      label="العائد الخالي من المخاطر"
-                      systemValue={settings.riskFreeRate}
-                      overrideValue={assetOverrides.riskFreeRate}
-                      step={0.005} min={0} max={0.2}
-                      onChange={(v) => handleAssetSettingChange('riskFreeRate', v)}
-                      isPercent
-                    />
-                    {/* Transaction Cost */}
-                    <AssetSettingRow
-                      label="تكلفة المعاملات"
-                      systemValue={settings.transactionCost}
-                      overrideValue={assetOverrides.transactionCost}
-                      step={0.0005} min={0} max={0.05}
-                      onChange={(v) => handleAssetSettingChange('transactionCost', v)}
-                      isPercent
-                    />
-                    {/* Cash Ratio */}
-                    <AssetSettingRow
-                      label="نسبة النقد للشراء"
-                      systemValue={settings.buyOrderCashRatio}
-                      overrideValue={assetOverrides.buyOrderCashRatio}
-                      step={0.05} min={0.05} max={1}
-                      onChange={(v) => handleAssetSettingChange('buyOrderCashRatio', v)}
-                      isPercent
-                    />
-                    {/* Z-Score Strong Buy */}
-                    <AssetSettingRow
-                      label="Z-Score شراء قوي"
-                      systemValue={settings.zScoreStrongBuy}
-                      overrideValue={assetOverrides.zScoreStrongBuy}
-                      step={0.5} min={-5} max={0}
-                      onChange={(v) => handleAssetSettingChange('zScoreStrongBuy', v)}
-                    />
-                    {/* Z-Score Strong Sell */}
-                    <AssetSettingRow
-                      label="Z-Score بيع قوي"
-                      systemValue={settings.zScoreStrongSell}
-                      overrideValue={assetOverrides.zScoreStrongSell}
-                      step={0.5} min={0} max={5}
-                      onChange={(v) => handleAssetSettingChange('zScoreStrongSell', v)}
-                    />
-                    {/* Sell Mode */}
+                    <AssetSettingRow label="α وزن شارب" systemValue={classDefaults.alpha} overrideValue={assetOverrides.alpha}
+                      step={0.05} min={0} max={1} onChange={(v) => handleAssetSettingChange('alpha', v)} refLabel="الفئة" />
+                    <AssetSettingRow label="β وزن Z-Score" systemValue={classDefaults.beta} overrideValue={assetOverrides.beta}
+                      step={0.05} min={0} max={1} onChange={(v) => handleAssetSettingChange('beta', v)} refLabel="الفئة" />
+                    <AssetSettingRow label="δ وزن الاتجاه" systemValue={classDefaults.delta} overrideValue={assetOverrides.delta}
+                      step={0.05} min={0} max={0.5} onChange={(v) => handleAssetSettingChange('delta', v)} refLabel="الفئة" />
+                    <AssetSettingRow label="ε وزن RSI" systemValue={classDefaults.epsilon} overrideValue={assetOverrides.epsilon}
+                      step={0.05} min={0} max={0.5} onChange={(v) => handleAssetSettingChange('epsilon', v)} refLabel="الفئة" />
+                    <AssetSettingRow label="ζ وزن الزخم" systemValue={classDefaults.zeta} overrideValue={assetOverrides.zeta}
+                      step={0.05} min={0} max={0.5} onChange={(v) => handleAssetSettingChange('zeta', v)} refLabel="الفئة" />
+                    <AssetSettingRow label="η وزن MACD" systemValue={classDefaults.eta} overrideValue={assetOverrides.eta}
+                      step={0.05} min={0} max={0.5} onChange={(v) => handleAssetSettingChange('eta', v)} refLabel="الفئة" />
+                    <AssetSettingRow label="γ وزن التكلفة" systemValue={classDefaults.gamma} overrideValue={assetOverrides.gamma}
+                      step={0.05} min={0} max={0.3} onChange={(v) => handleAssetSettingChange('gamma', v)} refLabel="الفئة" />
+
+                    <div className="border-t border-border pt-3 mt-1"></div>
+
+                    <AssetSettingRow label="عتبة الشراء" systemValue={settings.buyThreshold} overrideValue={assetOverrides.buyThreshold}
+                      step={0.05} min={0.5} max={0.95} onChange={(v) => handleAssetSettingChange('buyThreshold', v)} />
+                    <AssetSettingRow label="عتبة البيع" systemValue={settings.sellThreshold} overrideValue={assetOverrides.sellThreshold}
+                      step={0.05} min={0.05} max={0.5} onChange={(v) => handleAssetSettingChange('sellThreshold', v)} />
+                    <AssetSettingRow label="العائد الخالي من المخاطر" systemValue={settings.riskFreeRate} overrideValue={assetOverrides.riskFreeRate}
+                      step={0.005} min={0} max={0.2} onChange={(v) => handleAssetSettingChange('riskFreeRate', v)} isPercent />
+                    <AssetSettingRow label="تكلفة المعاملات" systemValue={settings.transactionCost} overrideValue={assetOverrides.transactionCost}
+                      step={0.0005} min={0} max={0.05} onChange={(v) => handleAssetSettingChange('transactionCost', v)} isPercent />
+                    <AssetSettingRow label="نسبة النقد للشراء" systemValue={classDefaults.buyOrderCashRatio} overrideValue={assetOverrides.buyOrderCashRatio}
+                      step={0.05} min={0.05} max={1} onChange={(v) => handleAssetSettingChange('buyOrderCashRatio', v)} isPercent refLabel="الفئة" />
+
+                    <div className="border-t border-border pt-3 mt-1"></div>
+
+                    <AssetSettingRow label="Z-Score شراء قوي" systemValue={classDefaults.zScoreStrongBuy} overrideValue={assetOverrides.zScoreStrongBuy}
+                      step={0.5} min={-5} max={0} onChange={(v) => handleAssetSettingChange('zScoreStrongBuy', v)} refLabel="الفئة" />
+                    <AssetSettingRow label="Z-Score بيع قوي" systemValue={classDefaults.zScoreStrongSell} overrideValue={assetOverrides.zScoreStrongSell}
+                      step={0.5} min={0} max={5} onChange={(v) => handleAssetSettingChange('zScoreStrongSell', v)} refLabel="الفئة" />
+
+                    <div className="border-t border-border pt-3 mt-1"></div>
+
+                    <AssetSettingRow label="فترة RSI" systemValue={classDefaults.rsiPeriod} overrideValue={assetOverrides.rsiPeriod}
+                      step={1} min={5} max={50} onChange={(v) => handleAssetSettingChange('rsiPeriod', v)} refLabel="الفئة" />
+                    <AssetSettingRow label="فترة المتوسط المتحرك" systemValue={classDefaults.maPeriod} overrideValue={assetOverrides.maPeriod}
+                      step={5} min={10} max={200} onChange={(v) => handleAssetSettingChange('maPeriod', v)} refLabel="الفئة" />
+                    <AssetSettingRow label="فترة الزخم" systemValue={classDefaults.momentumPeriod} overrideValue={assetOverrides.momentumPeriod}
+                      step={1} min={5} max={30} onChange={(v) => handleAssetSettingChange('momentumPeriod', v)} refLabel="الفئة" />
+
+                    <div className="border-t border-border pt-3 mt-1"></div>
+
+                    <AssetSettingRow label="Trailing Stop تفعيل" systemValue={classDefaults.trailingStopProfitTrigger} overrideValue={assetOverrides.trailingStopProfitTrigger}
+                      step={0.05} min={0.05} max={0.5} onChange={(v) => handleAssetSettingChange('trailingStopProfitTrigger', v)} isPercent refLabel="الفئة" />
+                    <AssetSettingRow label="Trailing Stop مسافة" systemValue={classDefaults.trailingStopDistance} overrideValue={assetOverrides.trailingStopDistance}
+                      step={0.01} min={0.03} max={0.25} onChange={(v) => handleAssetSettingChange('trailingStopDistance', v)} isPercent refLabel="الفئة" />
+
+                    {/* أسلوب البيع */}
                     <div className="flex items-center gap-3">
                       <div className="flex-1">
                         <div className="text-sm font-bold">أسلوب البيع</div>
                         <div className="text-xs text-gray-400">النظام: {SELL_MODES.find(m => m.value === settings.sellMode)?.label}</div>
                       </div>
-                      <select
-                        className="input w-40"
-                        value={assetOverrides.sellMode || ''}
-                        onChange={e => handleAssetSettingChange('sellMode', e.target.value || undefined)}
-                      >
+                      <select className="input w-40" value={assetOverrides.sellMode || ''}
+                        onChange={e => handleAssetSettingChange('sellMode', e.target.value || undefined)}>
                         <option value="">استخدام النظام</option>
-                        {SELL_MODES.map(m => (
-                          <option key={m.value} value={m.value}>{m.label}</option>
-                        ))}
+                        {SELL_MODES.map(m => (<option key={m.value} value={m.value}>{m.label}</option>))}
                       </select>
                     </div>
                   </div>
@@ -629,18 +592,20 @@ function SettingControl({ meta, value, defaultValue, onChange }: {
 
 // ============ صف إعداد أصل فردي ============
 
-function AssetSettingRow({ label, systemValue, overrideValue, step, min, max, onChange, isPercent }: {
+function AssetSettingRow({ label, systemValue, overrideValue, step, min, max, onChange, isPercent, refLabel }: {
   label: string;
   systemValue: number;
   overrideValue: number | undefined;
   step: number; min: number; max: number;
   onChange: (v: number | undefined) => void;
   isPercent?: boolean;
+  refLabel?: string;
 }) {
   const isOverridden = overrideValue !== undefined;
   const currentValue = overrideValue ?? systemValue;
   const displayVal = isPercent ? (currentValue * 100).toFixed(2) + '%' : currentValue.toFixed(4);
   const sysDisplay = isPercent ? (systemValue * 100).toFixed(2) + '%' : systemValue;
+  const ref = refLabel || 'النظام';
 
   return (
     <div className="flex items-center gap-3">
@@ -649,7 +614,7 @@ function AssetSettingRow({ label, systemValue, overrideValue, step, min, max, on
           <span className="text-sm font-bold">{label}</span>
           {isOverridden && <span className="text-xs text-orange-500">(مخصص)</span>}
         </div>
-        <div className="text-xs text-gray-400">النظام: {sysDisplay}</div>
+        <div className="text-xs text-gray-400">{ref}: {sysDisplay}</div>
       </div>
       <div className="flex items-center gap-2">
         <input
