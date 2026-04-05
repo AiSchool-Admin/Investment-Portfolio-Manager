@@ -5,11 +5,13 @@ import Dashboard from './Dashboard';
 import AssetsPage from './AssetsPage';
 import SignalsPage from './SignalsPage';
 import BacktestPage from './BacktestPage';
+import PositionBuilderPage from './PositionBuilderPage';
 import SettingsPage from './SettingsPage';
 
 const TABS = [
   { id: 'dashboard', label: 'لوحة التحكم', icon: '📊' },
   { id: 'assets', label: 'الأصول', icon: '💼' },
+  { id: 'builder', label: 'بناء المراكز', icon: '🏗️' },
   { id: 'signals', label: 'الإشارات', icon: '🔔' },
   { id: 'backtest', label: 'باك تيست', icon: '📈' },
   { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
@@ -49,9 +51,10 @@ export default function AppShell() {
       <main className="flex-1 overflow-auto pb-20 md:pb-4">
         {tab === 'dashboard' && <Dashboard key={refreshKey} onRefresh={refresh} />}
         {tab === 'assets' && <AssetsPage key={refreshKey} onRefresh={refresh} />}
+        {tab === 'builder' && <PositionBuilderPage key={refreshKey} onRefresh={refresh} />}
         {tab === 'signals' && <SignalsPage key={refreshKey} />}
         {tab === 'backtest' && <BacktestPage />}
-        {tab === 'settings' && <SettingsPage onProfileReset={() => window.location.reload()} />}
+        {tab === 'settings' && <SettingsPage />}
       </main>
 
       {/* شريط التنقل السفلي (جوال) */}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Asset, CATEGORY_OPTIONS } from '../lib/types';
+import { Asset, CATEGORY_GROUPS, getCategoryColor } from '../lib/types';
 import { getAssets, addAsset, updateAsset, deleteAsset, addPriceRecord, setPriceHistory, getPriceHistory } from '../lib/store';
 
 export default function AssetsPage({ onRefresh }: { onRefresh: () => void }) {
@@ -35,48 +35,45 @@ export default function AssetsPage({ onRefresh }: { onRefresh: () => void }) {
             onEdit={() => setEditId(editId === a.id ? null : a.id)}
             onUpdate={(updated) => { updateAsset(updated); reload(); }}
             onDelete={() => { deleteAsset(a.id); reload(); }}
-            onPriceUpdate={(price) => {
-              updateAsset({ ...a, currentPrice: price });
-              addPriceRecord(a.id, { date: new Date().toISOString().split('T')[0], close: price });
-              reload();
-            }}
             onReload={reload}
           />
         ))
       )}
 
       {showAdd && (
-        <AddAssetModal
+        <AssetFormModal
+          title="إضافة أصل جديد"
           onClose={() => setShowAdd(false)}
-          onAdd={(asset) => { addAsset(asset); reload(); setShowAdd(false); }}
+          onSave={(asset) => { addAsset(asset); reload(); setShowAdd(false); }}
         />
       )}
     </div>
   );
 }
 
-function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete, onPriceUpdate, onReload }: {
+function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete, onReload }: {
   asset: Asset; totalValue: number; isEditing: boolean;
   onEdit: () => void; onUpdate: (a: Asset) => void;
-  onDelete: () => void; onPriceUpdate: (price: number) => void;
-  onReload: () => void;
+  onDelete: () => void; onReload: () => void;
 }) {
   const [newPrice, setNewPrice] = useState('');
   const [csvStatus, setCsvStatus] = useState('');
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [previewData, setPreviewData] = useState<{ date: string; close: number }[] | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const val = a.quantity * a.currentPrice;
   const pl = val - a.quantity * a.purchasePrice;
   const plPct = a.purchasePrice > 0 ? ((a.currentPrice - a.purchasePrice) / a.purchasePrice) * 100 : 0;
   const weight = totalValue > 0 ? (val / totalValue) * 100 : 0;
   const isPos = pl >= 0;
 
-  // عدد السجلات التاريخية المحفوظة
   const historyCount = getPriceHistory(a.id).length;
 
-  // استيراد CSV للأسعار التاريخية
-  const importCSV = () => {
+  // قراءة CSV → عرض معاينة (بدون حفظ)
+  const loadCSVForPreview = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.csv';
+    input.accept = '.csv,.txt';
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
@@ -84,21 +81,21 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
       const lines = text.trim().split('\n');
       const records: { date: string; close: number }[] = [];
 
-      // تحديد أعمدة CSV
-      const header = lines[0].toLowerCase().split(',');
-      let dateCol = header.indexOf('date');
-      let closeCol = header.indexOf('close');
+      // محاولة تحديد الفاصل (فاصلة أو تاب)
+      const separator = lines[0].includes('\t') ? '\t' : ',';
+      const header = lines[0].toLowerCase().split(separator).map(h => h.trim());
+      let dateCol = header.findIndex(h => h.includes('date') || h.includes('تاريخ'));
+      let closeCol = header.findIndex(h => h.includes('close') || h.includes('value') || h.includes('price') || h.includes('قيمة') || h.includes('سعر'));
       if (dateCol === -1) dateCol = 0;
       if (closeCol === -1) closeCol = header.length > 4 ? 4 : 1;
 
       for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',');
-        if (cols.length <= closeCol) continue;
-        const date = cols[dateCol]?.trim();
-        const price = parseFloat(cols[closeCol]);
-        if (date && !isNaN(price) && price > 0) {
-          records.push({ date, close: price });
-        }
+        const cols = lines[i].split(separator).map(c => c.trim());
+        if (cols.length <= Math.max(dateCol, closeCol)) continue;
+        const date = cols[dateCol];
+        const priceStr = cols[closeCol]?.replace(/[^\d.-]/g, '');
+        const price = parseFloat(priceStr);
+        if (date && !isNaN(price) && price > 0) records.push({ date, close: price });
       }
 
       if (records.length === 0) {
@@ -106,27 +103,42 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
         return;
       }
 
-      // حفظ البيانات مربوطة بالأصل
-      setPriceHistory(a.id, records);
-
-      // تحديث السعر الحالي بآخر سعر في الملف
-      const lastPrice = records[records.length - 1].close;
-      updateAsset({ ...a, currentPrice: lastPrice });
-
-      setCsvStatus(`تم استيراد ${records.length} سجل بنجاح ✓`);
-      onReload();
-
-      // مسح الرسالة بعد 3 ثواني
-      setTimeout(() => setCsvStatus(''), 3000);
+      records.sort((a, b) => a.date.localeCompare(b.date));
+      setPreviewData(records);
+      setCsvStatus('');
     };
     input.click();
   };
+
+  // تأكيد حفظ البيانات المعاينة
+  const confirmSavePreview = () => {
+    if (!previewData || previewData.length === 0) return;
+    setPriceHistory(a.id, previewData);
+    const lastPrice = previewData[previewData.length - 1].close;
+    updateAsset({ ...a, currentPrice: lastPrice });
+    setCsvStatus(`تم حفظ ${previewData.length} سجل ✓`);
+    setPreviewData(null);
+    onReload();
+    setTimeout(() => setCsvStatus(''), 3000);
+  };
+
+  // مسح البيانات التاريخية
+  const clearHistory = () => {
+    if (!confirm(`هل تريد مسح كل البيانات التاريخية لـ "${a.name}"؟\nعدد السجلات: ${historyCount}`)) return;
+    setPriceHistory(a.id, []);
+    setCsvStatus('تم مسح البيانات التاريخية');
+    onReload();
+    setTimeout(() => setCsvStatus(''), 3000);
+  };
+
+  // عرض البيانات التاريخية الحالية
+  const currentHistory = showHistory ? getPriceHistory(a.id) : [];
 
   return (
     <div className="card mb-3">
       <div className="flex items-center gap-3 cursor-pointer" onClick={onEdit}>
         <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm"
-          style={{ background: a.category === 'أسهم' ? '#2196F3' : a.category === 'عملات رقمية' ? '#FF9800' : a.category === 'سندات' ? '#4CAF50' : a.category === 'سلع' ? '#FFC107' : '#9C27B0' }}>
+          style={{ background: getCategoryColor(a.category) }}>
           {a.name.slice(0, 2)}
         </div>
         <div className="flex-1">
@@ -143,13 +155,21 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
 
       {isEditing && (
         <div className="mt-4 pt-4 border-t border-border">
+          {/* معلومات الأصل */}
           <div className="grid grid-cols-2 gap-2 text-sm mb-3">
-            <div>الكمية: <b>{a.quantity}</b></div>
-            <div>سعر الشراء: <b>${a.purchasePrice.toFixed(2)}</b></div>
-            <div>السعر الحالي: <b>${a.currentPrice.toFixed(2)}</b></div>
-            <div>الربح/الخسارة: <b className={isPos ? 'text-green-600' : 'text-red-600'}>${pl.toFixed(2)}</b></div>
-            <div>تاريخ الشراء: <b>{a.purchaseDate}</b></div>
-            <div>الوزن المستهدف: <b>{(a.targetWeight * 100).toFixed(0)}%</b></div>
+            <div className="flex justify-between"><span>الكمية:</span><b>{a.quantity}</b></div>
+            <div className="flex justify-between"><span>سعر الشراء:</span><b>${a.purchasePrice.toFixed(2)}</b></div>
+            <div className="flex justify-between"><span>السعر الحالي:</span><b>${a.currentPrice.toFixed(2)}</b></div>
+            <div className="flex justify-between"><span>الربح/الخسارة:</span><b className={isPos ? 'text-green-600' : 'text-red-600'}>${pl.toFixed(2)}</b></div>
+            <div className="flex justify-between"><span>تاريخ الشراء:</span><b>{a.purchaseDate}</b></div>
+            <div className="flex justify-between"><span>الوزن المستهدف:</span><b>{(a.targetWeight * 100).toFixed(0)}%</b></div>
+          </div>
+
+          {/* أزرار الإجراءات */}
+          <div className="flex gap-2 mb-3">
+            <button className="btn-primary text-sm flex-1" onClick={() => setShowEditModal(true)}>
+              تعديل البيانات
+            </button>
           </div>
 
           {/* البيانات التاريخية */}
@@ -157,91 +177,282 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm">
                 <b>البيانات التاريخية:</b> {historyCount} سجل
-                {historyCount < 50 && <span className="text-orange-600 mr-1"> (يحتاج 50 على الأقل للإشارات)</span>}
-                {historyCount >= 50 && <span className="text-green-600 mr-1"> ✓ كافية للإشارات</span>}
+                {historyCount < 50 && <span className="text-orange-600 mr-1"> (يحتاج 50+ للإشارات)</span>}
+                {historyCount >= 50 && <span className="text-green-600 mr-1"> ✓ كافية</span>}
               </div>
             </div>
-            <button className="btn-outline text-sm w-full" onClick={importCSV}>
-              📁 استيراد أسعار تاريخية (CSV)
-            </button>
+
+            <div className="flex gap-2 mb-2">
+              <button className="btn-outline text-sm flex-1" onClick={loadCSVForPreview}>
+                📁 استيراد CSV
+              </button>
+              {historyCount > 0 && (
+                <>
+                  <button className="text-sm px-3 py-1.5 rounded border border-gray-200 hover:bg-gray-50 cursor-pointer"
+                    onClick={() => setShowHistory(!showHistory)}>
+                    {showHistory ? 'إخفاء' : '👁 عرض'}
+                  </button>
+                  <button className="text-sm px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50 cursor-pointer"
+                    onClick={clearHistory}>
+                    🗑 مسح
+                  </button>
+                </>
+              )}
+            </div>
+
             {csvStatus && (
-              <div className={`text-xs mt-2 text-center font-bold ${csvStatus.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>
+              <div className={`text-xs mt-1 text-center font-bold ${csvStatus.includes('✓') ? 'text-green-600' : csvStatus.includes('مسح') ? 'text-orange-600' : 'text-red-600'}`}>
                 {csvStatus}
+              </div>
+            )}
+
+            {/* عرض البيانات التاريخية الحالية */}
+            {showHistory && currentHistory.length > 0 && (
+              <div className="mt-2 max-h-48 overflow-y-auto border border-gray-200 rounded">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="border-b"><th className="text-right p-1">التاريخ</th><th className="text-right p-1">السعر</th></tr>
+                  </thead>
+                  <tbody>
+                    {currentHistory.slice(-30).reverse().map((r, i) => (
+                      <tr key={i} className="border-b border-gray-50">
+                        <td className="p-1">{r.date}</td>
+                        <td className="p-1 font-bold">{r.close.toFixed(4)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {currentHistory.length > 30 && (
+                  <div className="text-xs text-gray-400 text-center p-1">آخر 30 سجل من {currentHistory.length}</div>
+                )}
               </div>
             )}
           </div>
 
-          {/* تحديث السعر */}
+          {/* معاينة البيانات قبل الحفظ */}
+          {previewData && (
+            <div className="mb-3 p-3 rounded-lg border-2 border-blue-400 bg-blue-50">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-bold text-sm">معاينة قبل الحفظ ({previewData.length} سجل)</h4>
+                <div className="flex gap-2">
+                  <button className="text-xs px-2 py-1 rounded bg-green-600 text-white cursor-pointer hover:bg-green-700"
+                    onClick={confirmSavePreview}>
+                    ✓ حفظ
+                  </button>
+                  <button className="text-xs px-2 py-1 rounded bg-gray-400 text-white cursor-pointer hover:bg-gray-500"
+                    onClick={() => setPreviewData(null)}>
+                    ✕ إلغاء
+                  </button>
+                </div>
+              </div>
+
+              {/* ملخص سريع */}
+              <div className="grid grid-cols-4 gap-2 text-xs mb-2">
+                <div className="bg-white p-1.5 rounded text-center">
+                  <div className="text-gray-400">أول سعر</div>
+                  <div className="font-bold">{previewData[0].close.toFixed(4)}</div>
+                  <div className="text-gray-400">{previewData[0].date}</div>
+                </div>
+                <div className="bg-white p-1.5 rounded text-center">
+                  <div className="text-gray-400">آخر سعر</div>
+                  <div className="font-bold">{previewData[previewData.length - 1].close.toFixed(4)}</div>
+                  <div className="text-gray-400">{previewData[previewData.length - 1].date}</div>
+                </div>
+                <div className="bg-white p-1.5 rounded text-center">
+                  <div className="text-gray-400">أعلى</div>
+                  <div className="font-bold text-green-600">{Math.max(...previewData.map(r => r.close)).toFixed(4)}</div>
+                </div>
+                <div className="bg-white p-1.5 rounded text-center">
+                  <div className="text-gray-400">أدنى</div>
+                  <div className="font-bold text-red-600">{Math.min(...previewData.map(r => r.close)).toFixed(4)}</div>
+                </div>
+              </div>
+
+              {/* جدول معاينة */}
+              <div className="max-h-40 overflow-y-auto bg-white rounded border border-blue-200">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="border-b"><th className="text-right p-1">#</th><th className="text-right p-1">التاريخ</th><th className="text-right p-1">السعر</th></tr>
+                  </thead>
+                  <tbody>
+                    {previewData.map((r, i) => (
+                      <tr key={i} className={`border-b border-gray-50 ${i === 0 || i === previewData.length - 1 ? 'bg-yellow-50' : ''}`}>
+                        <td className="p-1 text-gray-400">{i + 1}</td>
+                        <td className="p-1">{r.date}</td>
+                        <td className="p-1 font-bold">{r.close.toFixed(4)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="text-xs text-blue-600 text-center mt-1 font-bold">
+                راجع البيانات ثم اضغط "حفظ" أو "إلغاء"
+              </div>
+            </div>
+          )}
+
+          {/* تحديث السعر السريع */}
           <div className="flex gap-2 mb-3">
-            <input className="input flex-1" type="number" placeholder="السعر الجديد" value={newPrice}
+            <input className="input flex-1" type="number" placeholder="تحديث السعر الحالي" value={newPrice}
               onChange={e => setNewPrice(e.target.value)} />
-            <button className="btn-primary text-sm" onClick={() => {
+            <button className="btn-outline text-sm" onClick={() => {
               const p = parseFloat(newPrice);
-              if (p > 0) { onPriceUpdate(p); setNewPrice(''); }
-            }}>تحديث السعر</button>
+              if (p > 0) {
+                updateAsset({ ...a, currentPrice: p });
+                addPriceRecord(a.id, { date: new Date().toISOString().split('T')[0], close: p });
+                onReload();
+                setNewPrice('');
+              }
+            }}>تحديث</button>
           </div>
 
-          <button className="btn-danger text-sm" onClick={() => { if (confirm('هل تريد حذف هذا الأصل؟')) onDelete(); }}>
+          <button className="text-sm px-3 py-2 rounded text-red-600 hover:bg-red-50 cursor-pointer w-full"
+            onClick={() => { if (confirm(`هل تريد حذف الأصل "${a.name}"؟`)) onDelete(); }}>
             حذف الأصل
           </button>
         </div>
+      )}
+
+      {/* نافذة تعديل بيانات الأصل */}
+      {showEditModal && (
+        <AssetFormModal
+          title={`تعديل ${a.name}`}
+          initialData={a}
+          onClose={() => setShowEditModal(false)}
+          onSave={(updated) => {
+            onUpdate({ ...a, ...updated, id: a.id });
+            setShowEditModal(false);
+          }}
+        />
       )}
     </div>
   );
 }
 
-function AddAssetModal({ onClose, onAdd }: { onClose: () => void; onAdd: (a: Asset) => void }) {
-  const [form, setForm] = useState({ name: '', category: 'أسهم', quantity: '', price: '', weight: '' });
+// ============ نافذة إضافة/تعديل أصل (مشتركة) ============
+
+function AssetFormModal({ title, initialData, onClose, onSave }: {
+  title: string;
+  initialData?: Asset;
+  onClose: () => void;
+  onSave: (a: Asset) => void;
+}) {
+  const [form, setForm] = useState({
+    name: initialData?.name || '',
+    category: initialData?.category || 'أسهم محلية',
+    quantity: initialData?.quantity?.toString() || '',
+    purchasePrice: initialData?.purchasePrice?.toString() || '',
+    currentPrice: initialData?.currentPrice?.toString() || '',
+    purchaseDate: initialData?.purchaseDate || new Date().toISOString().split('T')[0],
+    targetWeight: initialData ? (initialData.targetWeight * 100).toString() : '',
+  });
 
   const handleSubmit = () => {
-    if (!form.name || !form.quantity || !form.price) return alert('يرجى ملء جميع الحقول');
-    onAdd({
-      id: '',
+    if (!form.name || !form.quantity || !form.purchasePrice) return alert('يرجى ملء الحقول المطلوبة');
+    const qty = parseFloat(form.quantity);
+    const pp = parseFloat(form.purchasePrice);
+    const cp = parseFloat(form.currentPrice) || pp;
+    if (qty <= 0 || pp <= 0) return alert('الكمية والسعر يجب أن يكونا أكبر من صفر');
+
+    onSave({
+      id: initialData?.id || '',
       name: form.name.toUpperCase(),
       category: form.category,
-      quantity: parseFloat(form.quantity),
-      purchasePrice: parseFloat(form.price),
-      purchaseDate: new Date().toISOString().split('T')[0],
-      currentPrice: parseFloat(form.price),
-      targetWeight: (parseFloat(form.weight) || 0) / 100,
+      quantity: qty,
+      purchasePrice: pp,
+      purchaseDate: form.purchaseDate,
+      currentPrice: cp,
+      targetWeight: (parseFloat(form.targetWeight) || 0) / 100,
     });
   };
 
+  const isEdit = !!initialData;
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="card max-w-md w-full" onClick={e => e.stopPropagation()}>
-        <h2 className="text-xl font-bold mb-4">إضافة أصل جديد</h2>
+      <div className="card max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <h2 className="text-xl font-bold mb-4">{title}</h2>
         <div className="flex flex-col gap-3">
           <div>
-            <label className="text-sm font-bold">اسم الأصل</label>
+            <label className="text-sm font-bold">اسم الأصل *</label>
             <input className="input" placeholder="مثال: AAPL" value={form.name}
               onChange={e => setForm({ ...form, name: e.target.value })} />
           </div>
           <div>
             <label className="text-sm font-bold">الفئة</label>
             <select className="input" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
-              {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+              {Object.values(CATEGORY_GROUPS).map(g => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.categories.map(c => <option key={c} value={c}>{c}</option>)}
+                </optgroup>
+              ))}
             </select>
           </div>
-          <div>
-            <label className="text-sm font-bold">الكمية</label>
-            <input className="input" type="number" placeholder="10" value={form.quantity}
-              onChange={e => setForm({ ...form, quantity: e.target.value })} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-bold">الكمية *</label>
+              <input className="input" type="number" step="any" placeholder="10" value={form.quantity}
+                onChange={e => setForm({ ...form, quantity: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-sm font-bold">سعر الشراء *</label>
+              <input className="input" type="number" step="any" placeholder="150.00" value={form.purchasePrice}
+                onChange={e => setForm({ ...form, purchasePrice: e.target.value })} />
+            </div>
           </div>
-          <div>
-            <label className="text-sm font-bold">سعر الشراء</label>
-            <input className="input" type="number" placeholder="150.00" value={form.price}
-              onChange={e => setForm({ ...form, price: e.target.value })} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-bold">السعر الحالي</label>
+              <input className="input" type="number" step="any" placeholder="السعر الحالي" value={form.currentPrice}
+                onChange={e => setForm({ ...form, currentPrice: e.target.value })} />
+            </div>
+            <div>
+              <label className="text-sm font-bold">تاريخ الشراء</label>
+              <input className="input" type="date" value={form.purchaseDate}
+                onChange={e => setForm({ ...form, purchaseDate: e.target.value })} />
+            </div>
           </div>
           <div>
             <label className="text-sm font-bold">الوزن المستهدف (%)</label>
-            <input className="input" type="number" placeholder="20" value={form.weight}
-              onChange={e => setForm({ ...form, weight: e.target.value })} />
+            <input className="input" type="number" step="1" placeholder="20" value={form.targetWeight}
+              onChange={e => setForm({ ...form, targetWeight: e.target.value })} />
           </div>
+
+          {/* ملخص */}
+          {form.quantity && form.purchasePrice && (
+            <div className="p-3 rounded-lg bg-gray-50 text-sm">
+              <div className="flex justify-between">
+                <span>تكلفة الشراء:</span>
+                <b>${((parseFloat(form.quantity) || 0) * (parseFloat(form.purchasePrice) || 0)).toFixed(2)}</b>
+              </div>
+              {form.currentPrice && (
+                <>
+                  <div className="flex justify-between">
+                    <span>القيمة الحالية:</span>
+                    <b>${((parseFloat(form.quantity) || 0) * (parseFloat(form.currentPrice) || 0)).toFixed(2)}</b>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>الربح/الخسارة:</span>
+                    {(() => {
+                      const q = parseFloat(form.quantity) || 0;
+                      const pp = parseFloat(form.purchasePrice) || 0;
+                      const cp = parseFloat(form.currentPrice) || 0;
+                      const diff = (cp - pp) * q;
+                      return <b className={diff >= 0 ? 'text-green-600' : 'text-red-600'}>
+                        {diff >= 0 ? '+' : ''}${diff.toFixed(2)}
+                      </b>;
+                    })()}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex gap-3 mt-4">
           <button className="btn-outline flex-1" onClick={onClose}>إلغاء</button>
-          <button className="btn-primary flex-1" onClick={handleSubmit}>إضافة</button>
+          <button className="btn-primary flex-1" onClick={handleSubmit}>
+            {isEdit ? 'حفظ التعديلات' : 'إضافة'}
+          </button>
         </div>
       </div>
     </div>

@@ -1,19 +1,38 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getProfile } from './lib/store';
-import Questionnaire from './components/Questionnaire';
+import { getProfile, saveProfile, syncFromSupabase } from './lib/store';
+import { isSupabaseConfigured } from './lib/supabaseClient';
 import AppShell from './components/AppShell';
 
 export default function Page() {
-  const [hasProfile, setHasProfile] = useState<boolean | null>(null);
+  const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState('جاري التحميل...');
 
   useEffect(() => {
-    setHasProfile(getProfile() !== null);
+    async function init() {
+      // إذا Supabase متصل → سحب البيانات من قاعدة البيانات
+      if (isSupabaseConfigured()) {
+        setStatus('جاري الاتصال بقاعدة البيانات...');
+        await syncFromSupabase();
+      }
+
+      // إذا لم يكن هناك ملف استثماري → ننشئ افتراضي
+      if (!getProfile()) {
+        saveProfile({
+          riskScore: 5, profileType: 'balanced',
+          stocksWeight: 0.35, cryptoWeight: 0.10, bondsWeight: 0.25,
+          commoditiesWeight: 0.10, realEstateWeight: 0.10, cashWeight: 0.10,
+          availableCash: 10000,
+        });
+      }
+
+      setReady(true);
+    }
+    init();
   }, []);
 
-  // شاشة التحميل
-  if (hasProfile === null) {
+  if (!ready) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
@@ -21,17 +40,11 @@ export default function Page() {
           <div className="text-2xl font-bold" style={{ color: 'var(--primary)' }}>
             مدير المحفظة الاستثمارية
           </div>
-          <div className="text-sm text-gray-500 mt-2">جاري التحميل...</div>
+          <div className="text-sm text-gray-500 mt-2">{status}</div>
         </div>
       </div>
     );
   }
 
-  // استبيان المخاطر (أول مرة)
-  if (!hasProfile) {
-    return <Questionnaire onComplete={() => setHasProfile(true)} />;
-  }
-
-  // التطبيق الرئيسي
   return <AppShell />;
 }

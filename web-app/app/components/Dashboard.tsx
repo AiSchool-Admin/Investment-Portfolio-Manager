@@ -1,9 +1,9 @@
 'use client';
 
 import { useMemo } from 'react';
-import { getAssets, getProfile, getPriceList } from '../lib/store';
+import { getAssets, getProfile, getPriceList, getSystemSettings, getEffectiveSettings, getPlans } from '../lib/store';
 import { analyzeAsset, checkRebalancing } from '../lib/engine';
-import { TradingSignal, RebalanceItem } from '../lib/types';
+import { TradingSignal, RebalanceItem, PositionBuildingPlan } from '../lib/types';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 const COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#009688', '#FFC107', '#3F51B5'];
@@ -11,32 +11,40 @@ const COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#009688'
 export default function Dashboard({ onRefresh }: { onRefresh: () => void }) {
   const assets = getAssets();
   const profile = getProfile();
+  const systemSettings = getSystemSettings();
   const totalValue = assets.reduce((s, a) => s + a.quantity * a.currentPrice, 0);
   const totalPurchase = assets.reduce((s, a) => s + a.quantity * a.purchasePrice, 0);
   const totalPL = totalValue - totalPurchase;
   const plPercent = totalPurchase > 0 ? (totalPL / totalPurchase) * 100 : 0;
   const cash = profile?.availableCash ?? 0;
 
-  // تحليل الإشارات
+  // تحليل الإشارات باستخدام الإعدادات الفعالة لكل أصل
   const signals = useMemo<TradingSignal[]>(() => {
     return assets.map(a => {
       const prices = getPriceList(a.id);
       if (prices.length < 10) return null;
-      return analyzeAsset(a.name, a.id, a.currentPrice, prices, a.quantity, totalValue, a.targetWeight, cash);
+      const effectiveSettings = getEffectiveSettings(a.id, a.category);
+      return analyzeAsset(a.name, a.id, a.currentPrice, prices, a.quantity, totalValue, a.targetWeight, cash, a.purchasePrice, effectiveSettings);
     }).filter(Boolean) as TradingSignal[];
   }, [assets, totalValue, cash]);
 
   const activeSignals = signals.filter(s => s.signalType !== 'none');
 
-  // إعادة التوازن
+  // خطط بناء المراكز النشطة
+  const activePlans = useMemo(() => {
+    return getPlans().filter(p => p.status === 'active');
+  }, []);
+
+  // إعادة التوازن باستخدام عتبة من الإعدادات
   const rebalancing = useMemo<RebalanceItem[]>(() => {
     if (totalValue <= 0) return [];
     return checkRebalancing(
       assets.map(a => a.name),
       assets.map(a => (a.quantity * a.currentPrice) / totalValue),
       assets.map(a => a.targetWeight),
+      systemSettings.rebalanceThreshold,
     );
-  }, [assets, totalValue]);
+  }, [assets, totalValue, systemSettings.rebalanceThreshold]);
 
   // بيانات الرسم البياني
   const pieData = assets.map(a => ({ name: a.name, value: a.quantity * a.currentPrice }));
@@ -163,6 +171,41 @@ export default function Dashboard({ onRefresh }: { onRefresh: () => void }) {
           )}
         </div>
       </div>
+
+      {/* خطط بناء المراكز */}
+      {activePlans.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-lg font-bold mb-3">
+            بناء المراكز
+            <span className="mr-2 text-xs text-white px-2 py-0.5 rounded-full" style={{ background: 'var(--primary)' }}>
+              {activePlans.length}
+            </span>
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {activePlans.map(plan => {
+              const executedCount = plan.tranches.filter(t => t.executed).length;
+              const nextTranche = plan.tranches.find(t => !t.executed);
+              const progress = executedCount / plan.numTranches;
+              return (
+                <div key={plan.id} className="card">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🏗️</span>
+                    <span className="font-bold">{plan.assetName}</span>
+                    <span className="text-xs text-gray-400">{plan.strategy}</span>
+                  </div>
+                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden mb-2">
+                    <div className="h-full rounded-full" style={{ width: `${progress * 100}%`, background: 'var(--primary)' }} />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>{executedCount}/{plan.numTranches} دفعات</span>
+                    {nextTranche && <span>التالية: ${nextTranche.value.toFixed(0)} في {nextTranche.targetDate}</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* جدول الأصول */}
       <h2 className="text-lg font-bold mb-3">ملخص الأصول</h2>
