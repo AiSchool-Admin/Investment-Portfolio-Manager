@@ -33,7 +33,8 @@ export default function BacktestPage() {
       alert(`${assetName}: لا توجد بيانات تاريخية كافية (${prices.length} سجل). استورد CSV من صفحة الأصول أولاً.`);
       return;
     }
-    const settings = useAssetSettings ? getEffectiveSettings(assetId) : systemSettings;
+    const asset = assets.find(a => a.id === assetId);
+    const settings = useAssetSettings ? getEffectiveSettings(assetId, asset?.category) : systemSettings;
     runBT(prices, assetName, settings);
   };
 

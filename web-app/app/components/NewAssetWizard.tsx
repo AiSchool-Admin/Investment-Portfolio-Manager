@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { CATEGORY_GROUPS } from '../lib/types';
+import { CATEGORY_GROUPS, getAssetClassDefaults, getAssetClassCode } from '../lib/types';
 import { getProfile, getAssets, getSystemSettings, addAsset, addPlan, setPriceHistory } from '../lib/store';
 import {
   calculateHalfKellyPositionSize,
@@ -41,11 +41,27 @@ export default function NewAssetWizard({ onComplete, onCancel }: Props) {
 
   const profile = getProfile();
   const assets = getAssets();
-  const settings = getSystemSettings();
+  const baseSettings = getSystemSettings();
   const totalPortfolioValue = assets.reduce((s, a) => s + a.quantity * a.currentPrice, 0) + (profile?.availableCash ?? 0);
   const availableCash = profile?.availableCash ?? 0;
 
-  // حساب OS من البيانات التاريخية
+  // إعدادات مبنية على فئة الأصل المختارة
+  const categoryDefaults = useMemo(() => getAssetClassDefaults(assetCategory), [assetCategory]);
+  const settings = useMemo(() => ({
+    ...baseSettings,
+    alpha: categoryDefaults.alpha, beta: categoryDefaults.beta,
+    delta: categoryDefaults.delta, epsilon: categoryDefaults.epsilon,
+    zeta: categoryDefaults.zeta, eta: categoryDefaults.eta, gamma: categoryDefaults.gamma,
+    maPeriod: categoryDefaults.maPeriod, rsiPeriod: categoryDefaults.rsiPeriod,
+    momentumPeriod: categoryDefaults.momentumPeriod,
+    macdFast: categoryDefaults.macdFast, macdSlow: categoryDefaults.macdSlow, macdSignal: categoryDefaults.macdSignal,
+    zScoreStrongBuy: categoryDefaults.zScoreStrongBuy, zScoreStrongSell: categoryDefaults.zScoreStrongSell,
+    buyOrderCashRatio: categoryDefaults.buyOrderCashRatio,
+    trailingStopProfitTrigger: categoryDefaults.trailingStopProfitTrigger,
+    trailingStopDistance: categoryDefaults.trailingStopDistance,
+  }), [baseSettings, categoryDefaults]);
+
+  // حساب OS من البيانات التاريخية باستخدام إعدادات الفئة
   const optimumScore = useMemo(() => {
     const price = parseFloat(currentPrice);
     if (!price || historicalPrices.length < 10) return 0.5;
@@ -68,14 +84,12 @@ export default function NewAssetWizard({ onComplete, onCancel }: Props) {
     [historicalPrices]
   );
 
-  // الأفق الزمني الافتراضي
-  const defaultHorizon = useMemo(() =>
-    getDefaultHorizonDays(assetCategory, marketVol),
-    [assetCategory, marketVol]
-  );
+  // الأفق الزمني وعدد الدفعات من إعدادات الفئة
+  const defaultHorizon = categoryDefaults.horizonDays;
+  const defaultTranches = categoryDefaults.dcaTranches;
 
   const actualHorizon = parseInt(horizonDays) || defaultHorizon;
-  const actualTranches = parseInt(numTranches) || 4;
+  const actualTranches = parseInt(numTranches) || defaultTranches;
 
   // معاينة الخطة
   const previewPlan = useMemo(() => {
