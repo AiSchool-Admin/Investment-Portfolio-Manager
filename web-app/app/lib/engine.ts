@@ -264,28 +264,8 @@ export function analyzeAsset(
   let suggestedQuantity = 0, suggestedValue = 0;
   const reasons: string[] = [];
 
-  // 1. إعادة توازن إلزامية (تتجاوز OS)
-  const weightDeviation = Math.abs(currentWeight - targetWeight);
-  if (weightDeviation > s.forceRebalanceThreshold && quantityHeld > 0) {
-    if (currentWeight > targetWeight) {
-      signalType = 'sell';
-      signalSource = 'force_rebalance';
-      reasons.push(`انحراف الوزن ${(weightDeviation * 100).toFixed(1)}% > ${(s.forceRebalanceThreshold * 100).toFixed(0)}% → إعادة توازن إلزامية`);
-      const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, 'rebalance');
-      suggestedQuantity = order.quantity;
-      suggestedValue = order.value;
-    } else {
-      signalType = 'buy';
-      signalSource = 'force_rebalance';
-      reasons.push(`انحراف الوزن ${(weightDeviation * 100).toFixed(1)}% > ${(s.forceRebalanceThreshold * 100).toFixed(0)}% → شراء لإعادة التوازن`);
-      const order = calculateBuyOrder(targetWeight, currentWeight, effPV, availableCash, currentPrice, s.buyOrderCashRatio);
-      suggestedQuantity = order.quantity;
-      suggestedValue = order.value;
-    }
-  }
-  // 2. Trailing Stop
-  else if (s.trailingStopEnabled && profitPct > s.trailingStopProfitTrigger && quantityHeld > 0) {
-    // تحقق: هل السعر انخفض بنسبة trailingStopDistance من أعلى سعر تاريخي بعد الشراء
+  // 1. Trailing Stop
+  if (s.trailingStopEnabled && profitPct > s.trailingStopProfitTrigger && quantityHeld > 0) {
     const maxPrice = Math.max(...historicalPrices.slice(-60));
     const dropFromMax = maxPrice > 0 ? (maxPrice - currentPrice) / maxPrice : 0;
     if (dropFromMax >= s.trailingStopDistance) {
@@ -298,7 +278,7 @@ export function analyzeAsset(
     }
   }
 
-  // 3. إشارات OS المشروطة
+  // 2. إشارات OS المشروطة
   if (signalType === 'none') {
     if (os >= s.buyThreshold && trend >= 0 && rsiSig >= -0.5) {
       signalType = 'buy';
