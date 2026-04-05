@@ -59,6 +59,8 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
   const [newPrice, setNewPrice] = useState('');
   const [csvStatus, setCsvStatus] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
+  const [previewData, setPreviewData] = useState<{ date: string; close: number }[] | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const val = a.quantity * a.currentPrice;
   const pl = val - a.quantity * a.purchasePrice;
   const plPct = a.purchasePrice > 0 ? ((a.currentPrice - a.purchasePrice) / a.purchasePrice) * 100 : 0;
@@ -67,38 +69,70 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
 
   const historyCount = getPriceHistory(a.id).length;
 
-  const importCSV = () => {
+  // قراءة CSV → عرض معاينة (بدون حفظ)
+  const loadCSVForPreview = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.csv';
+    input.accept = '.csv,.txt';
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
       const text = await file.text();
       const lines = text.trim().split('\n');
       const records: { date: string; close: number }[] = [];
-      const header = lines[0].toLowerCase().split(',');
-      let dateCol = header.indexOf('date');
-      let closeCol = header.indexOf('close');
+
+      // محاولة تحديد الفاصل (فاصلة أو تاب)
+      const separator = lines[0].includes('\t') ? '\t' : ',';
+      const header = lines[0].toLowerCase().split(separator).map(h => h.trim());
+      let dateCol = header.findIndex(h => h.includes('date') || h.includes('تاريخ'));
+      let closeCol = header.findIndex(h => h.includes('close') || h.includes('value') || h.includes('price') || h.includes('قيمة') || h.includes('سعر'));
       if (dateCol === -1) dateCol = 0;
       if (closeCol === -1) closeCol = header.length > 4 ? 4 : 1;
+
       for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',');
-        if (cols.length <= closeCol) continue;
-        const date = cols[dateCol]?.trim();
-        const price = parseFloat(cols[closeCol]);
+        const cols = lines[i].split(separator).map(c => c.trim());
+        if (cols.length <= Math.max(dateCol, closeCol)) continue;
+        const date = cols[dateCol];
+        const priceStr = cols[closeCol]?.replace(/[^\d.-]/g, '');
+        const price = parseFloat(priceStr);
         if (date && !isNaN(price) && price > 0) records.push({ date, close: price });
       }
-      if (records.length === 0) { setCsvStatus('لم يتم العثور على بيانات صالحة'); return; }
-      setPriceHistory(a.id, records);
-      const lastPrice = records[records.length - 1].close;
-      updateAsset({ ...a, currentPrice: lastPrice });
-      setCsvStatus(`تم استيراد ${records.length} سجل ✓`);
-      onReload();
-      setTimeout(() => setCsvStatus(''), 3000);
+
+      if (records.length === 0) {
+        setCsvStatus('لم يتم العثور على بيانات صالحة في الملف');
+        return;
+      }
+
+      records.sort((a, b) => a.date.localeCompare(b.date));
+      setPreviewData(records);
+      setCsvStatus('');
     };
     input.click();
   };
+
+  // تأكيد حفظ البيانات المعاينة
+  const confirmSavePreview = () => {
+    if (!previewData || previewData.length === 0) return;
+    setPriceHistory(a.id, previewData);
+    const lastPrice = previewData[previewData.length - 1].close;
+    updateAsset({ ...a, currentPrice: lastPrice });
+    setCsvStatus(`تم حفظ ${previewData.length} سجل ✓`);
+    setPreviewData(null);
+    onReload();
+    setTimeout(() => setCsvStatus(''), 3000);
+  };
+
+  // مسح البيانات التاريخية
+  const clearHistory = () => {
+    if (!confirm(`هل تريد مسح كل البيانات التاريخية لـ "${a.name}"؟\nعدد السجلات: ${historyCount}`)) return;
+    setPriceHistory(a.id, []);
+    setCsvStatus('تم مسح البيانات التاريخية');
+    onReload();
+    setTimeout(() => setCsvStatus(''), 3000);
+  };
+
+  // عرض البيانات التاريخية الحالية
+  const currentHistory = showHistory ? getPriceHistory(a.id) : [];
 
   return (
     <div className="card mb-3">
@@ -147,15 +181,115 @@ function AssetCard({ asset: a, totalValue, isEditing, onEdit, onUpdate, onDelete
                 {historyCount >= 50 && <span className="text-green-600 mr-1"> ✓ كافية</span>}
               </div>
             </div>
-            <button className="btn-outline text-sm w-full" onClick={importCSV}>
-              📁 استيراد أسعار تاريخية (CSV)
-            </button>
+
+            <div className="flex gap-2 mb-2">
+              <button className="btn-outline text-sm flex-1" onClick={loadCSVForPreview}>
+                📁 استيراد CSV
+              </button>
+              {historyCount > 0 && (
+                <>
+                  <button className="text-sm px-3 py-1.5 rounded border border-gray-200 hover:bg-gray-50 cursor-pointer"
+                    onClick={() => setShowHistory(!showHistory)}>
+                    {showHistory ? 'إخفاء' : '👁 عرض'}
+                  </button>
+                  <button className="text-sm px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50 cursor-pointer"
+                    onClick={clearHistory}>
+                    🗑 مسح
+                  </button>
+                </>
+              )}
+            </div>
+
             {csvStatus && (
-              <div className={`text-xs mt-2 text-center font-bold ${csvStatus.includes('✓') ? 'text-green-600' : 'text-red-600'}`}>
+              <div className={`text-xs mt-1 text-center font-bold ${csvStatus.includes('✓') ? 'text-green-600' : csvStatus.includes('مسح') ? 'text-orange-600' : 'text-red-600'}`}>
                 {csvStatus}
               </div>
             )}
+
+            {/* عرض البيانات التاريخية الحالية */}
+            {showHistory && currentHistory.length > 0 && (
+              <div className="mt-2 max-h-48 overflow-y-auto border border-gray-200 rounded">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="border-b"><th className="text-right p-1">التاريخ</th><th className="text-right p-1">السعر</th></tr>
+                  </thead>
+                  <tbody>
+                    {currentHistory.slice(-30).reverse().map((r, i) => (
+                      <tr key={i} className="border-b border-gray-50">
+                        <td className="p-1">{r.date}</td>
+                        <td className="p-1 font-bold">{r.close.toFixed(4)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {currentHistory.length > 30 && (
+                  <div className="text-xs text-gray-400 text-center p-1">آخر 30 سجل من {currentHistory.length}</div>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* معاينة البيانات قبل الحفظ */}
+          {previewData && (
+            <div className="mb-3 p-3 rounded-lg border-2 border-blue-400 bg-blue-50">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-bold text-sm">معاينة قبل الحفظ ({previewData.length} سجل)</h4>
+                <div className="flex gap-2">
+                  <button className="text-xs px-2 py-1 rounded bg-green-600 text-white cursor-pointer hover:bg-green-700"
+                    onClick={confirmSavePreview}>
+                    ✓ حفظ
+                  </button>
+                  <button className="text-xs px-2 py-1 rounded bg-gray-400 text-white cursor-pointer hover:bg-gray-500"
+                    onClick={() => setPreviewData(null)}>
+                    ✕ إلغاء
+                  </button>
+                </div>
+              </div>
+
+              {/* ملخص سريع */}
+              <div className="grid grid-cols-4 gap-2 text-xs mb-2">
+                <div className="bg-white p-1.5 rounded text-center">
+                  <div className="text-gray-400">أول سعر</div>
+                  <div className="font-bold">{previewData[0].close.toFixed(4)}</div>
+                  <div className="text-gray-400">{previewData[0].date}</div>
+                </div>
+                <div className="bg-white p-1.5 rounded text-center">
+                  <div className="text-gray-400">آخر سعر</div>
+                  <div className="font-bold">{previewData[previewData.length - 1].close.toFixed(4)}</div>
+                  <div className="text-gray-400">{previewData[previewData.length - 1].date}</div>
+                </div>
+                <div className="bg-white p-1.5 rounded text-center">
+                  <div className="text-gray-400">أعلى</div>
+                  <div className="font-bold text-green-600">{Math.max(...previewData.map(r => r.close)).toFixed(4)}</div>
+                </div>
+                <div className="bg-white p-1.5 rounded text-center">
+                  <div className="text-gray-400">أدنى</div>
+                  <div className="font-bold text-red-600">{Math.min(...previewData.map(r => r.close)).toFixed(4)}</div>
+                </div>
+              </div>
+
+              {/* جدول معاينة */}
+              <div className="max-h-40 overflow-y-auto bg-white rounded border border-blue-200">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="border-b"><th className="text-right p-1">#</th><th className="text-right p-1">التاريخ</th><th className="text-right p-1">السعر</th></tr>
+                  </thead>
+                  <tbody>
+                    {previewData.map((r, i) => (
+                      <tr key={i} className={`border-b border-gray-50 ${i === 0 || i === previewData.length - 1 ? 'bg-yellow-50' : ''}`}>
+                        <td className="p-1 text-gray-400">{i + 1}</td>
+                        <td className="p-1">{r.date}</td>
+                        <td className="p-1 font-bold">{r.close.toFixed(4)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="text-xs text-blue-600 text-center mt-1 font-bold">
+                راجع البيانات ثم اضغط "حفظ" أو "إلغاء"
+              </div>
+            </div>
+          )}
 
           {/* تحديث السعر السريع */}
           <div className="flex gap-2 mb-3">
