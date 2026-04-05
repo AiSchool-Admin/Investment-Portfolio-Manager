@@ -5,10 +5,12 @@ import { getAssets, getProfile, getPriceList, getSystemSettings, getEffectiveSet
 import { analyzeAsset, checkRebalancing } from '../lib/engine';
 import { TradingSignal, RebalanceItem, PositionBuildingPlan } from '../lib/types';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import PortfolioRiskCard from './PortfolioRiskCard';
+import ProactiveAlertsPanel from './ProactiveAlertsPanel';
 
 const COLORS = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336', '#009688', '#FFC107', '#3F51B5'];
 
-export default function Dashboard({ onRefresh }: { onRefresh: () => void }) {
+export default function Dashboard({ onRefresh, onNavigate }: { onRefresh: () => void; onNavigate?: (tab: string) => void }) {
   const assets = getAssets();
   const profile = getProfile();
   const systemSettings = getSystemSettings();
@@ -68,6 +70,9 @@ export default function Dashboard({ onRefresh }: { onRefresh: () => void }) {
         <button onClick={onRefresh} className="btn-outline text-sm">تحديث ↻</button>
       </div>
 
+      {/* التنبيهات الاستباقية */}
+      <ProactiveAlertsPanel onNavigate={onNavigate} />
+
       {/* الملخص + الرسم البياني */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {/* بطاقة القيمة الإجمالية */}
@@ -106,6 +111,9 @@ export default function Dashboard({ onRefresh }: { onRefresh: () => void }) {
           </div>
         )}
       </div>
+
+      {/* مخاطر المحفظة */}
+      <PortfolioRiskCard />
 
       {/* الإشارات + إعادة التوازن */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
