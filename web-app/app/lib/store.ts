@@ -371,7 +371,13 @@ export function exportAllData(): string {
   const data: Record<string, unknown> = {};
   for (const [name, key] of Object.entries(KEYS)) {
     const raw = localStorage.getItem(key);
-    if (raw) { try { data[name] = JSON.parse(raw); } catch { data[name] = raw; } }
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        data[name] = parsed;  // الاسم المنطقي (profile, assets...)
+        data[key] = parsed;   // المفتاح الكامل (portfolio_profile...) - للتوافق
+      } catch { data[name] = raw; }
+    }
   }
   data._exportDate = new Date().toISOString();
   return JSON.stringify(data, null, 2);
@@ -382,12 +388,16 @@ export function importAllData(json: string): { success: boolean; message: string
     const data = JSON.parse(json);
     if (!data || typeof data !== 'object') return { success: false, message: 'ملف غير صالح' };
     let count = 0;
+
+    // دعم كلا الصيغتين: المفاتيح المنطقية (profile) أو مفاتيح localStorage (portfolio_profile)
     for (const [name, key] of Object.entries(KEYS)) {
-      if (data[name] !== undefined) {
-        localStorage.setItem(key, typeof data[name] === 'string' ? data[name] as string : JSON.stringify(data[name]));
+      const value = data[name] ?? data[key]; // جرب الاسم المنطقي أو المفتاح الكامل
+      if (value !== undefined) {
+        localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
         count++;
       }
     }
+
     // رفع البيانات المستوردة إلى Supabase
     pushAllToSupabase();
     return { success: true, message: `تم استيراد ${count} مجموعة بيانات بنجاح` };
