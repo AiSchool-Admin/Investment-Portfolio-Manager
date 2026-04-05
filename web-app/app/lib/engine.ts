@@ -212,9 +212,35 @@ export function calculateADX(prices: number[], period = 14): number {
 // تحديد نوع السوق: متذبذب أو ذو اتجاه
 export type MarketRegime = 'trending' | 'ranging';
 
-export function detectMarketRegime(prices: number[], adxThreshold = 20): MarketRegime {
+// كشف التذبذب بعدة طرق (أكثر دقة من ADX وحده)
+export function detectMarketRegime(prices: number[], adxThreshold = 20, maPeriod = 50): MarketRegime {
+  if (prices.length < maPeriod + 10) return 'trending'; // بيانات غير كافية
+
   const adx = calculateADX(prices);
-  return adx < adxThreshold ? 'ranging' : 'trending';
+
+  // طريقة إضافية: عدد تقاطعات المتوسط المتحرك
+  // إذا السعر تقاطع مع MA عدة مرات → متذبذب
+  const recent = prices.slice(-maPeriod);
+  const ma = mean(recent);
+  let crossings = 0;
+  for (let i = 1; i < recent.length; i++) {
+    if ((recent[i] > ma && recent[i - 1] <= ma) || (recent[i] < ma && recent[i - 1] >= ma)) {
+      crossings++;
+    }
+  }
+
+  // طريقة إضافية: العائد الصافي مقارنة بالتقلب
+  // عائد صافي صغير + تقلب عالي = متذبذب
+  const netReturn = Math.abs((prices[prices.length - 1] - prices[prices.length - maPeriod]) / prices[prices.length - maPeriod]);
+  const vol = standardDeviation(calculateReturns(recent));
+  const efficiencyRatio = vol > 0 ? netReturn / (vol * Math.sqrt(maPeriod)) : 1;
+
+  // متذبذب إذا: ADX < عتبة أو تقاطعات كثيرة أو عائد صافي ضعيف
+  if (adx < adxThreshold) return 'ranging';
+  if (crossings >= 4) return 'ranging';
+  if (efficiencyRatio < 0.3) return 'ranging';
+
+  return 'trending';
 }
 
 // ============ Bollinger Bands ============
@@ -411,7 +437,7 @@ export function analyzeAsset(
 
   // كشف نوع السوق (متذبذب أو ذو اتجاه)
   const adx = calculateADX(historicalPrices, s.adxPeriod);
-  const regime = adx < s.adxThreshold ? 'ranging' : 'trending';
+  const regime = detectMarketRegime(historicalPrices, s.adxThreshold, s.maPeriod);
   const bb = calculateBollingerBands(historicalPrices, s.bollingerPeriod, s.bollingerStdDev);
   const bbSignal = bollingerToSignal(bb.percentB);
 
@@ -423,12 +449,13 @@ export function analyzeAsset(
     theta: s.rangingTheta, gamma: s.rangingGamma,
   } : s;
 
-  // في السوق المتذبذب: عكس الاتجاه والزخم (mean-reversion)
+  // في السوق المتذبذب: عكس الاتجاه والزخم وMACD (mean-reversion)
   const effTrend = regime === 'ranging' ? -trend : trend;
   const effMomentum = regime === 'ranging' ? -momentum : momentum;
+  const effMacdSig = regime === 'ranging' ? -macdSig : macdSig;
 
   // حساب OS بالأوزان المناسبة
-  const os = computeOptimumScore(shr, zScoreAdj, effTrend, rsiSig, effMomentum, macdSig, lowVolSig, s.transactionCost, effectiveSettings);
+  const os = computeOptimumScore(shr, zScoreAdj, effTrend, rsiSig, effMomentum, effMacdSig, lowVolSig, s.transactionCost, effectiveSettings);
 
   // عتبات حسب نوع السوق
   const buyTh = regime === 'ranging' ? s.rangingBuyThreshold : s.buyThreshold;
@@ -626,7 +653,7 @@ export function runBacktest(
 
     // كشف نوع السوق
     const adx = calculateADX(allPricesSoFar, settings.adxPeriod);
-    const regime = adx < settings.adxThreshold ? 'ranging' : 'trending';
+    const regime = detectMarketRegime(allPricesSoFar, settings.adxThreshold, Math.min(settings.maPeriod, allPricesSoFar.length - 1));
     const bb = calculateBollingerBands(allPricesSoFar, settings.bollingerPeriod, settings.bollingerStdDev);
 
     // أوزان حسب نوع السوق
@@ -637,12 +664,12 @@ export function runBacktest(
       theta: settings.rangingTheta, gamma: settings.rangingGamma,
     } : settings;
 
-    // في السوق المتذبذب: عكس إشارة الاتجاه والزخم (mean-reversion)
-    // "تحت المتوسط" = فرصة شراء (إيجابي) بدل إشارة سلبية
+    // في السوق المتذبذب: عكس الاتجاه والزخم وMACD (mean-reversion)
     const effTrend = regime === 'ranging' ? -trend : trend;
     const effMom = regime === 'ranging' ? -mom : mom;
+    const effMacd = regime === 'ranging' ? -macdSig : macdSig;
 
-    const os = computeOptimumScore(shr, zAdj, effTrend, rsiSig, effMom, macdSig, lowVolSig, cost, effSettings);
+    const os = computeOptimumScore(shr, zAdj, effTrend, rsiSig, effMom, effMacd, lowVolSig, cost, effSettings);
     const bTh = regime === 'ranging' ? settings.rangingBuyThreshold : buyThreshold;
     const sTh = regime === 'ranging' ? settings.rangingSellThreshold : sellThreshold;
 

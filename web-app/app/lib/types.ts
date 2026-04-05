@@ -292,8 +292,8 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   rangingTheta: 0.05,
   rangingGamma: 0.10,
 
-  rangingBuyThreshold: 0.65,
-  rangingSellThreshold: 0.35,
+  rangingBuyThreshold: 0.55,
+  rangingSellThreshold: 0.45,
 
   hardStopLossEnabled: true,
   hardStopLossPercent: 0.05,
