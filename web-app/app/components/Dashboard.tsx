@@ -23,7 +23,7 @@ export default function Dashboard({ onRefresh }: { onRefresh: () => void }) {
     return assets.map(a => {
       const prices = getPriceList(a.id);
       if (prices.length < 10) return null;
-      const effectiveSettings = getEffectiveSettings(a.id);
+      const effectiveSettings = getEffectiveSettings(a.id, a.category);
       return analyzeAsset(a.name, a.id, a.currentPrice, prices, a.quantity, totalValue, a.targetWeight, cash, a.purchasePrice, effectiveSettings);
     }).filter(Boolean) as TradingSignal[];
   }, [assets, totalValue, cash]);

@@ -4,7 +4,7 @@
  * عند بدء التشغيل: يسحب من Supabase ويحدّث localStorage
  */
 
-import { Asset, InvestorProfile, Trade, PriceRecord, SystemSettings, AssetSettings, DEFAULT_SYSTEM_SETTINGS, PositionBuildingPlan, TrancheNotification } from './types';
+import { Asset, InvestorProfile, Trade, PriceRecord, SystemSettings, AssetSettings, DEFAULT_SYSTEM_SETTINGS, PositionBuildingPlan, TrancheNotification, getAssetClassDefaults } from './types';
 import { getSupabase } from './supabaseClient';
 
 const KEYS = {
@@ -282,15 +282,44 @@ export function deleteAssetSettings(assetId: string): void {
   localStorage.setItem(KEYS.assetSettings, JSON.stringify(all));
 }
 
-export function getEffectiveSettings(assetId: string): SystemSettings {
+// دمج 3 طبقات: إعدادات النظام ← إعدادات فئة الأصل ← إعدادات الأصل الفردية
+export function getEffectiveSettings(assetId: string, assetCategory?: string): SystemSettings {
   const sys = getSystemSettings();
+
+  // طبقة 2: إعدادات فئة الأصل (إذا معروفة)
+  let merged = { ...sys };
+  if (assetCategory) {
+    const classDefaults = getAssetClassDefaults(assetCategory);
+    merged = {
+      ...merged,
+      alpha: classDefaults.alpha,
+      beta: classDefaults.beta,
+      delta: classDefaults.delta,
+      epsilon: classDefaults.epsilon,
+      zeta: classDefaults.zeta,
+      eta: classDefaults.eta,
+      gamma: classDefaults.gamma,
+      maPeriod: classDefaults.maPeriod,
+      rsiPeriod: classDefaults.rsiPeriod,
+      momentumPeriod: classDefaults.momentumPeriod,
+      macdFast: classDefaults.macdFast,
+      macdSlow: classDefaults.macdSlow,
+      macdSignal: classDefaults.macdSignal,
+      zScoreStrongBuy: classDefaults.zScoreStrongBuy,
+      zScoreStrongSell: classDefaults.zScoreStrongSell,
+      buyOrderCashRatio: classDefaults.buyOrderCashRatio,
+      trailingStopProfitTrigger: classDefaults.trailingStopProfitTrigger,
+      trailingStopDistance: classDefaults.trailingStopDistance,
+    };
+  }
+
+  // طبقة 3: إعدادات الأصل الفردية (تتجاوز كل شيء)
   const asset = getAssetSettings(assetId);
-  if (!asset) return sys;
-  // دمج: كل حقل محدد في إعدادات الأصل يتجاوز النظام
-  const merged = { ...sys };
-  for (const key of Object.keys(asset) as (keyof typeof asset)[]) {
-    if (key !== 'assetId' && asset[key] !== undefined) {
-      (merged as Record<string, unknown>)[key] = asset[key];
+  if (asset) {
+    for (const key of Object.keys(asset) as (keyof typeof asset)[]) {
+      if (key !== 'assetId' && asset[key] !== undefined) {
+        (merged as Record<string, unknown>)[key] = asset[key];
+      }
     }
   }
   return merged;

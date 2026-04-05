@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { getProfile, saveProfile, getTrades, getAssets, getSystemSettings, saveSystemSettings, resetSystemSettings, getAssetSettings, saveAssetSettings, deleteAssetSettings, downloadDataAsFile, importDataFromFile } from '../lib/store';
-import { PROFILE_NAMES, SystemSettings, AssetSettings, SETTINGS_META, DEFAULT_SYSTEM_SETTINGS } from '../lib/types';
+import { PROFILE_NAMES, SystemSettings, AssetSettings, SETTINGS_META, DEFAULT_SYSTEM_SETTINGS, getAssetClassDefaults, getAssetClassCode } from '../lib/types';
 
 const SELL_MODES = [
   { value: 'rebalance', label: 'إعادة توازن' },
@@ -217,11 +217,21 @@ export default function SettingsPage() {
               </div>
 
               {/* تفاصيل إعدادات الأصل */}
-              {selectedAssetId && assetOverrides && (
+              {selectedAssetId && assetOverrides && (() => {
+                const selectedAsset = assets.find(a => a.id === selectedAssetId);
+                const classCode = selectedAsset ? getAssetClassCode(selectedAsset.category) : 'EQ';
+                const classDefaults = selectedAsset ? getAssetClassDefaults(selectedAsset.category) : getAssetClassDefaults('أسهم محلية');
+                return (
                 <div className="card">
+                  {/* معلومات الفئة */}
+                  <div className="mb-3 p-2 rounded bg-blue-50 text-xs text-blue-700">
+                    فئة الأصل: <b>{selectedAsset?.category}</b> → كود: <b>{classCode}</b> |
+                    الأوزان الافتراضية: α={classDefaults.alpha} β={classDefaults.beta} δ={classDefaults.delta} ε={classDefaults.epsilon} ζ={classDefaults.zeta} η={classDefaults.eta} γ={classDefaults.gamma}
+                  </div>
+
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-bold text-lg">
-                      إعدادات {assets.find(a => a.id === selectedAssetId)?.name}
+                      إعدادات {selectedAsset?.name}
                     </h3>
                     <button className="btn-outline text-xs" onClick={clearAssetOverrides}>
                       مسح التخصيصات
@@ -335,7 +345,8 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 </div>
-              )}
+                );
+              })()}
             </>
           )}
         </div>

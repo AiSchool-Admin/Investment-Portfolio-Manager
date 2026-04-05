@@ -220,13 +220,151 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   zScoreStrongSell: 2,
 };
 
-// أنماط المعاملات المسبقة
+// أنماط المعاملات المسبقة حسب نمط المستثمر
 export const PROFILE_PRESETS: Record<string, Partial<SystemSettings>> = {
   aggressive: { alpha: 0.15, beta: 0.30, delta: 0.25, epsilon: 0.15, zeta: 0.10, eta: 0.00, gamma: 0.05 },
   balanced: { alpha: 0.20, beta: 0.20, delta: 0.15, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.10 },
   income: { alpha: 0.30, beta: 0.15, delta: 0.15, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05 },
   capital_preservation: { alpha: 0.40, beta: 0.15, delta: 0.15, epsilon: 0.15, zeta: 0.10, eta: 0.00, gamma: 0.05 },
 };
+
+// ============ الضبط المثالي لكل فئة أصل ============
+// مستمد من منهجيات BlackRock, Goldman Sachs, Bridgewater
+
+export interface AssetClassConfig {
+  // أوزان OS
+  alpha: number; beta: number; delta: number; epsilon: number;
+  zeta: number; eta: number; gamma: number;
+  // مؤشرات
+  maPeriod: number;
+  rsiPeriod: number;
+  rsiBuyThreshold: number;   // عتبة RSI للشراء (مثلاً 30)
+  rsiSellThreshold: number;  // عتبة RSI للبيع (مثلاً 70)
+  momentumPeriod: number;
+  macdFast: number; macdSlow: number; macdSignal: number;
+  zScoreStrongBuy: number;
+  zScoreStrongSell: number;
+  // إدارة مخاطر
+  halfKellyRatio: number;    // نسبة استخدام كيلي (0.5 = نصف)
+  riskRewardRatio: number;
+  buyOrderCashRatio: number;
+  trailingStopProfitTrigger: number;
+  trailingStopDistance: number;
+  // بناء المركز
+  dcaTranches: number;
+  horizonDays: number;
+}
+
+// القيم الافتراضية المثالية لكل فئة أصل
+export const ASSET_CLASS_DEFAULTS: Record<string, AssetClassConfig> = {
+  // === الأسهم ===
+  EQ: {
+    alpha: 0.25, beta: 0.20, delta: 0.20, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05,
+    maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70,
+    momentumPeriod: 10, macdFast: 12, macdSlow: 26, macdSignal: 9,
+    zScoreStrongBuy: -2, zScoreStrongSell: 2,
+    halfKellyRatio: 0.50, riskRewardRatio: 2.0, buyOrderCashRatio: 0.30,
+    trailingStopProfitTrigger: 0.20, trailingStopDistance: 0.15,
+    dcaTranches: 4, horizonDays: 90,
+  },
+  // === الدخل الثابت ===
+  FI: {
+    alpha: 0.35, beta: 0.15, delta: 0.20, epsilon: 0.10, zeta: 0.10, eta: 0.10, gamma: 0.05,
+    maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70,
+    momentumPeriod: 10, macdFast: 12, macdSlow: 26, macdSignal: 9,
+    zScoreStrongBuy: -1.5, zScoreStrongSell: 1.5,
+    halfKellyRatio: 0.40, riskRewardRatio: 1.5, buyOrderCashRatio: 0.25,
+    trailingStopProfitTrigger: 0.05, trailingStopDistance: 0.05,
+    dcaTranches: 3, horizonDays: 60,
+  },
+  // === السلع والمعادن الثمينة ===
+  CM: {
+    alpha: 0.20, beta: 0.25, delta: 0.20, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05,
+    maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 25, rsiSellThreshold: 75,
+    momentumPeriod: 10, macdFast: 12, macdSlow: 26, macdSignal: 9,
+    zScoreStrongBuy: -2.5, zScoreStrongSell: 2.5,
+    halfKellyRatio: 0.30, riskRewardRatio: 2.5, buyOrderCashRatio: 0.20,
+    trailingStopProfitTrigger: 0.30, trailingStopDistance: 0.20,
+    dcaTranches: 6, horizonDays: 180,
+  },
+  // === العقارات ===
+  RE: {
+    alpha: 0.30, beta: 0.15, delta: 0.20, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05,
+    maPeriod: 100, rsiPeriod: 20, rsiBuyThreshold: 30, rsiSellThreshold: 70,
+    momentumPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9,
+    zScoreStrongBuy: -2, zScoreStrongSell: 2,
+    halfKellyRatio: 0.25, riskRewardRatio: 2.0, buyOrderCashRatio: 0.15,
+    trailingStopProfitTrigger: 0.25, trailingStopDistance: 0.15,
+    dcaTranches: 4, horizonDays: 365,
+  },
+  // === النقد وما يعادله ===
+  CS: {
+    alpha: 0.50, beta: 0.05, delta: 0.10, epsilon: 0.05, zeta: 0.05, eta: 0.05, gamma: 0.20,
+    maPeriod: 20, rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70,
+    momentumPeriod: 5, macdFast: 12, macdSlow: 26, macdSignal: 9,
+    zScoreStrongBuy: -1, zScoreStrongSell: 1,
+    halfKellyRatio: 1.0, riskRewardRatio: 1.0, buyOrderCashRatio: 1.0,
+    trailingStopProfitTrigger: 1.0, trailingStopDistance: 1.0,
+    dcaTranches: 1, horizonDays: 30,
+  },
+  // === رأس المال الجريء ===
+  VC: {
+    alpha: 0.15, beta: 0.30, delta: 0.15, epsilon: 0.10, zeta: 0.10, eta: 0.10, gamma: 0.10,
+    maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70,
+    momentumPeriod: 10, macdFast: 12, macdSlow: 26, macdSignal: 9,
+    zScoreStrongBuy: -2, zScoreStrongSell: 2,
+    halfKellyRatio: 0.15, riskRewardRatio: 5.0, buyOrderCashRatio: 0.10,
+    trailingStopProfitTrigger: 1.0, trailingStopDistance: 1.0,
+    dcaTranches: 3, horizonDays: 730,
+  },
+  // === الأسهم الخاصة ===
+  PE: {
+    alpha: 0.20, beta: 0.25, delta: 0.15, epsilon: 0.10, zeta: 0.10, eta: 0.10, gamma: 0.10,
+    maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70,
+    momentumPeriod: 10, macdFast: 12, macdSlow: 26, macdSignal: 9,
+    zScoreStrongBuy: -2, zScoreStrongSell: 2,
+    halfKellyRatio: 0.20, riskRewardRatio: 3.0, buyOrderCashRatio: 0.15,
+    trailingStopProfitTrigger: 1.0, trailingStopDistance: 1.0,
+    dcaTranches: 2, horizonDays: 365,
+  },
+  // === العملات الرقمية ===
+  CR: {
+    alpha: 0.10, beta: 0.35, delta: 0.20, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05,
+    maPeriod: 50, rsiPeriod: 14, rsiBuyThreshold: 20, rsiSellThreshold: 80,
+    momentumPeriod: 7, macdFast: 12, macdSlow: 26, macdSignal: 9,
+    zScoreStrongBuy: -3, zScoreStrongSell: 3,
+    halfKellyRatio: 0.25, riskRewardRatio: 3.0, buyOrderCashRatio: 0.20,
+    trailingStopProfitTrigger: 0.40, trailingStopDistance: 0.25,
+    dcaTranches: 3, horizonDays: 45,
+  },
+};
+
+// ربط فئات الأصول بأكواد المجموعات
+export function getAssetClassCode(category: string): string {
+  for (const [groupKey, group] of Object.entries(CATEGORY_GROUPS)) {
+    if (group.categories.includes(category)) {
+      switch (groupKey) {
+        case 'stocks': return 'EQ';
+        case 'fixedIncome': return 'FI';
+        case 'cash': return 'CS';
+        case 'preciousMetals': case 'commodities': return 'CM';
+        case 'realEstate': return 'RE';
+        case 'crypto': return 'CR';
+        case 'funds':
+          if (category.includes('تحوط') || category.includes('خاصة')) return 'PE';
+          return 'EQ'; // صناديق متوازنة → مثل الأسهم
+        default: return 'EQ';
+      }
+    }
+  }
+  return 'EQ';
+}
+
+// الحصول على الإعدادات الافتراضية لفئة أصل
+export function getAssetClassDefaults(category: string): AssetClassConfig {
+  const code = getAssetClassCode(category);
+  return ASSET_CLASS_DEFAULTS[code] || ASSET_CLASS_DEFAULTS['EQ'];
+}
 
 // وصف كل إعداد (للعرض الديناميكي)
 export interface SettingMeta {
