@@ -3,8 +3,8 @@
  * ترجمة من optimizer.py إلى TypeScript
  */
 
-import { PositionBuildingPlan, Tranche, TrancheNotification } from './types';
-import { mean, standardDeviation, calculateReturns, computeOptimumScore, expectedReturn, volatility, calculateZScore } from './engine';
+import { PositionBuildingPlan, Tranche, TrancheNotification, SystemSettings, DEFAULT_SYSTEM_SETTINGS } from './types';
+import { mean, standardDeviation, calculateReturns, expectedReturn, volatility, calculateZScore, calculateMA, calculateTrendStrength, calculateZScoreAdj, calculateTrend, calculateRSI, rsiToSignal, calculateMomentum, calculateMACD, macdToSignal, sharpeRatio, computeOptimumScore } from './engine';
 
 // ============ Half-Kelly Position Sizing ============
 
@@ -312,17 +312,22 @@ export function checkTrancheNotifications(
 export function computeOSFromPrices(
   currentPrice: number,
   historicalPrices: number[],
-  rf: number,
-  cost: number,
-  alpha: number,
-  beta: number,
-  gamma: number,
-  tradingDays: number,
+  s: SystemSettings = DEFAULT_SYSTEM_SETTINGS,
 ): number {
   if (historicalPrices.length < 10) return 0.5;
   const returns = calculateReturns(historicalPrices);
   const zScore = calculateZScore(currentPrice, historicalPrices);
-  const expRet = expectedReturn(returns, tradingDays);
-  const vol = volatility(returns, tradingDays);
-  return computeOptimumScore(expRet, vol, zScore, rf, cost, alpha, beta, gamma);
+  const ma = calculateMA(historicalPrices, s.maPeriod);
+  const ts = calculateTrendStrength(currentPrice, ma);
+  const zAdj = calculateZScoreAdj(zScore, ts);
+  const trend = calculateTrend(currentPrice, ma);
+  const rsi = calculateRSI(historicalPrices, s.rsiPeriod);
+  const rsiSig = rsiToSignal(rsi);
+  const mom = calculateMomentum(historicalPrices, s.momentumPeriod);
+  const macdRes = calculateMACD(historicalPrices, s.macdFast, s.macdSlow, s.macdSignal);
+  const macdSig = macdToSignal(macdRes.histogram, currentPrice);
+  const expRet = expectedReturn(returns, s.tradingDaysPerYear);
+  const vol = volatility(returns, s.tradingDaysPerYear);
+  const shr = sharpeRatio(expRet, s.riskFreeRate, vol);
+  return computeOptimumScore(shr, zAdj, trend, rsiSig, mom, macdSig, s.transactionCost, s);
 }

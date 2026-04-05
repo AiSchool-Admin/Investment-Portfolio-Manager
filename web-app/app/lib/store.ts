@@ -286,16 +286,14 @@ export function getEffectiveSettings(assetId: string): SystemSettings {
   const sys = getSystemSettings();
   const asset = getAssetSettings(assetId);
   if (!asset) return sys;
-  return {
-    ...sys,
-    alpha: asset.alpha ?? sys.alpha, beta: asset.beta ?? sys.beta,
-    gamma: asset.gamma ?? sys.gamma, buyThreshold: asset.buyThreshold ?? sys.buyThreshold,
-    sellThreshold: asset.sellThreshold ?? sys.sellThreshold, riskFreeRate: asset.riskFreeRate ?? sys.riskFreeRate,
-    transactionCost: asset.transactionCost ?? sys.transactionCost, sellMode: asset.sellMode ?? sys.sellMode,
-    buyOrderCashRatio: asset.buyOrderCashRatio ?? sys.buyOrderCashRatio,
-    zScoreStrongBuy: asset.zScoreStrongBuy ?? sys.zScoreStrongBuy,
-    zScoreStrongSell: asset.zScoreStrongSell ?? sys.zScoreStrongSell,
-  };
+  // دمج: كل حقل محدد في إعدادات الأصل يتجاوز النظام
+  const merged = { ...sys };
+  for (const key of Object.keys(asset) as (keyof typeof asset)[]) {
+    if (key !== 'assetId' && asset[key] !== undefined) {
+      (merged as Record<string, unknown>)[key] = asset[key];
+    }
+  }
+  return merged;
 }
 
 // ============ خطط بناء المراكز ============

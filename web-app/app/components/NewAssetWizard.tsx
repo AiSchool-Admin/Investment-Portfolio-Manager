@@ -49,12 +49,7 @@ export default function NewAssetWizard({ onComplete, onCancel }: Props) {
   const optimumScore = useMemo(() => {
     const price = parseFloat(currentPrice);
     if (!price || historicalPrices.length < 10) return 0.5;
-    return computeOSFromPrices(
-      price, historicalPrices,
-      settings.riskFreeRate, settings.transactionCost,
-      settings.alpha, settings.beta, settings.gamma,
-      settings.tradingDaysPerYear,
-    );
+    return computeOSFromPrices(price, historicalPrices, settings);
   }, [currentPrice, historicalPrices, settings]);
 
   // حساب Half-Kelly

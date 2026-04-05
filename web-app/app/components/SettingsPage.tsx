@@ -142,6 +142,29 @@ export default function SettingsPage() {
             <button className="btn-outline text-xs" onClick={handleResetSettings}>استعادة الافتراضية</button>
           </div>
 
+          {/* تفعيل Trailing Stop */}
+          <div className="card mb-4">
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
+                <span className="font-bold">وقف الخسارة المتحرك (Trailing Stop)</span>
+                <div className="text-xs text-gray-400">عند تحقيق ربح كبير، يحمي الأرباح تلقائياً</div>
+              </div>
+              <input type="checkbox" className="w-5 h-5 accent-[#1B5E20]"
+                checked={settings.trailingStopEnabled}
+                onChange={e => handleSettingChange('trailingStopEnabled' as keyof SystemSettings, e.target.checked as unknown as number)} />
+            </label>
+          </div>
+
+          {/* مجموع أوزان OS */}
+          {(() => {
+            const sum = settings.alpha + settings.beta + settings.delta + settings.epsilon + settings.zeta + settings.eta + settings.gamma;
+            return (
+              <div className={`text-xs text-center font-bold mb-2 ${Math.abs(sum - 1) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
+                مجموع أوزان OS: {sum.toFixed(2)} {Math.abs(sum - 1) >= 0.01 && '(يجب أن يكون 1.00)'}
+              </div>
+            );
+          })()}
+
           {Object.entries(groupedSettings).map(([group, metas]) => (
             <div key={group} className="card mb-4">
               <h3 className="font-bold text-lg mb-3 pb-2 border-b border-border">{group}</h3>
@@ -150,8 +173,8 @@ export default function SettingsPage() {
                   <SettingControl
                     key={meta.key}
                     meta={meta}
-                    value={settings[meta.key]}
-                    defaultValue={DEFAULT_SYSTEM_SETTINGS[meta.key]}
+                    value={settings[meta.key] as number | string}
+                    defaultValue={DEFAULT_SYSTEM_SETTINGS[meta.key] as number | string}
                     onChange={(v) => handleSettingChange(meta.key, v)}
                   />
                 ))}

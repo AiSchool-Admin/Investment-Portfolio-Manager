@@ -32,8 +32,24 @@ export interface TradingSignal {
   assetName: string;
   assetId: string;
   signalType: 'buy' | 'sell' | 'none';
+  signalSource: 'os' | 'trailing_stop' | 'force_rebalance'; // مصدر الإشارة
   optimumScore: number;
-  zScore: number;
+  confidence: number; // درجة الثقة (0-1)
+
+  // العوامل الفردية
+  factors: {
+    sharpe: number;
+    zScore: number;
+    zScoreAdj: number;
+    trend: number;        // +1, 0, -1
+    trendStrength: number;
+    rsi: number;          // 0-100
+    rsiSignal: number;    // -1 to +1
+    momentum: number;     // -1 to +1
+    macd: number;         // -1 to +1
+    ma50: number;         // قيمة المتوسط المتحرك
+  };
+
   expectedReturn: number;
   volatility: number;
   currentPrice: number;
@@ -83,41 +99,55 @@ export interface RebalanceItem {
 // ============ إعدادات النظام الديناميكية ============
 
 export interface SystemSettings {
-  // معاملات محرك Optimum Score
-  alpha: number;          // وزن شارب (0-1)
-  beta: number;           // وزن Z-Score (0-1)
-  gamma: number;          // وزن تكلفة المعاملات (0-1)
+  // === أوزان محرك OS المحسّن (المجموع = 1) ===
+  alpha: number;          // وزن شارب (Sharpe)
+  beta: number;           // وزن Z-Score المعدّل (Z_adj)
+  delta: number;          // وزن الاتجاه (Trend)
+  epsilon: number;        // وزن RSI
+  zeta: number;           // وزن الزخم (Momentum)
+  eta: number;            // وزن MACD
+  gamma: number;          // وزن تكلفة المعاملات
+
+  // === معاملات أساسية ===
   riskFreeRate: number;   // معدل العائد الخالي من المخاطر (سنوي)
   transactionCost: number; // تكلفة المعاملات (نسبة)
+  sigmoidK: number;       // حساسية دالة Sigmoid (k)
 
-  // عتبات الإشارات
+  // === عتبات الإشارات ===
   buyThreshold: number;   // عتبة الشراء (OS >= هذه القيمة)
   sellThreshold: number;  // عتبة البيع (OS <= هذه القيمة)
 
-  // عتبة إعادة التوازن
-  rebalanceThreshold: number; // نسبة الانحراف المسموحة
+  // === عتبة إعادة التوازن ===
+  rebalanceThreshold: number;    // عتبة عادية (5%)
+  forceRebalanceThreshold: number; // عتبة إلزامية (10%) - تتجاوز OS
 
-  // مؤشر RSI
-  rsiPeriod: number;
+  // === فترات المؤشرات ===
+  rsiPeriod: number;       // فترة RSI (يوم)
+  maPeriod: number;        // فترة المتوسط المتحرك MA (يوم)
+  momentumPeriod: number;  // فترة الزخم (يوم)
+  macdFast: number;        // MACD الخط السريع
+  macdSlow: number;        // MACD الخط البطيء
+  macdSignal: number;      // MACD خط الإشارة
 
-  // باك تيست
-  backtestLookback: number;    // نافذة المراجعة (يوم)
-  backtestBuyRatio: number;    // نسبة النقد للشراء في الباك تيست
-  backtestSellRatio: number;   // نسبة البيع في الباك تيست
+  // === Trailing Stop ===
+  trailingStopEnabled: boolean;
+  trailingStopProfitTrigger: number; // نسبة الربح التي تفعّل الـ trailing stop
+  trailingStopDistance: number;      // المسافة من أعلى سعر
 
-  // حجم الصفقة
-  buyOrderCashRatio: number;   // نسبة النقد المستخدم في أمر الشراء
-  sellMode: 'rebalance' | 'half' | 'quarter' | 'all'; // أسلوب البيع الافتراضي
+  // === باك تيست ===
+  backtestLookback: number;
+  backtestBuyRatio: number;
+  backtestSellRatio: number;
 
-  // Monte Carlo
+  // === حجم الصفقة ===
+  buyOrderCashRatio: number;
+  sellMode: 'rebalance' | 'half' | 'quarter' | 'all';
+
+  // === عام ===
   monteCarloIterations: number;
-
-  // أيام التداول السنوية (للتقييس السنوي)
   tradingDaysPerYear: number;
-
-  // Z-Score عتبات التنبيه
-  zScoreStrongBuy: number;    // أقل من هذا = فرصة شراء قوية
-  zScoreStrongSell: number;   // أكثر من هذا = فرصة بيع قوية
+  zScoreStrongBuy: number;
+  zScoreStrongSell: number;
 }
 
 // إعدادات مخصصة لكل أصل (تتجاوز إعدادات النظام)
@@ -125,7 +155,12 @@ export interface AssetSettings {
   assetId: string;
   alpha?: number;
   beta?: number;
+  delta?: number;
+  epsilon?: number;
+  zeta?: number;
+  eta?: number;
   gamma?: number;
+  sigmoidK?: number;
   buyThreshold?: number;
   sellThreshold?: number;
   riskFreeRate?: number;
@@ -134,19 +169,46 @@ export interface AssetSettings {
   buyOrderCashRatio?: number;
   zScoreStrongBuy?: number;
   zScoreStrongSell?: number;
+  rsiPeriod?: number;
+  maPeriod?: number;
+  momentumPeriod?: number;
+  trailingStopEnabled?: boolean;
+  trailingStopProfitTrigger?: number;
+  trailingStopDistance?: number;
 }
 
-// القيم الافتراضية لإعدادات النظام
+// القيم الافتراضية لإعدادات النظام (نمط متوازن)
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
-  alpha: 0.4,
-  beta: 0.4,
-  gamma: 0.2,
+  // أوزان OS (المجموع = 1.0)
+  alpha: 0.20,    // Sharpe
+  beta: 0.20,     // Z_adj
+  delta: 0.15,    // Trend
+  epsilon: 0.15,  // RSI
+  zeta: 0.10,     // Momentum
+  eta: 0.10,      // MACD
+  gamma: 0.10,    // Cost
+
   riskFreeRate: 0.03,
   transactionCost: 0.001,
+  sigmoidK: 2.5,
+
   buyThreshold: 0.7,
   sellThreshold: 0.3,
+
   rebalanceThreshold: 0.05,
+  forceRebalanceThreshold: 0.10,
+
   rsiPeriod: 14,
+  maPeriod: 50,
+  momentumPeriod: 10,
+  macdFast: 12,
+  macdSlow: 26,
+  macdSignal: 9,
+
+  trailingStopEnabled: true,
+  trailingStopProfitTrigger: 0.20,
+  trailingStopDistance: 0.10,
+
   backtestLookback: 50,
   backtestBuyRatio: 0.3,
   backtestSellRatio: 0.5,
@@ -156,6 +218,14 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   tradingDaysPerYear: 252,
   zScoreStrongBuy: -2,
   zScoreStrongSell: 2,
+};
+
+// أنماط المعاملات المسبقة
+export const PROFILE_PRESETS: Record<string, Partial<SystemSettings>> = {
+  aggressive: { alpha: 0.15, beta: 0.30, delta: 0.25, epsilon: 0.15, zeta: 0.10, eta: 0.00, gamma: 0.05 },
+  balanced: { alpha: 0.20, beta: 0.20, delta: 0.15, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.10 },
+  income: { alpha: 0.30, beta: 0.15, delta: 0.15, epsilon: 0.15, zeta: 0.10, eta: 0.10, gamma: 0.05 },
+  capital_preservation: { alpha: 0.40, beta: 0.15, delta: 0.15, epsilon: 0.15, zeta: 0.10, eta: 0.00, gamma: 0.05 },
 };
 
 // وصف كل إعداد (للعرض الديناميكي)
@@ -171,39 +241,50 @@ export interface SettingMeta {
 }
 
 export const SETTINGS_META: SettingMeta[] = [
-  // محرك Optimum Score
-  { key: 'alpha', label: 'α وزن شارب', description: 'وزن نسبة شارب في حساب Optimum Score', min: 0, max: 1, step: 0.05, unit: '', group: 'محرك Optimum Score' },
-  { key: 'beta', label: 'β وزن Z-Score', description: 'وزن مؤشر Z-Score في حساب Optimum Score', min: 0, max: 1, step: 0.05, unit: '', group: 'محرك Optimum Score' },
-  { key: 'gamma', label: 'γ وزن التكلفة', description: 'وزن تكلفة المعاملات في حساب Optimum Score', min: 0, max: 1, step: 0.05, unit: '', group: 'محرك Optimum Score' },
-  { key: 'riskFreeRate', label: 'العائد الخالي من المخاطر', description: 'معدل العائد الخالي من المخاطر السنوي (مثل عائد السندات الحكومية)', min: 0, max: 0.2, step: 0.005, unit: '%', group: 'محرك Optimum Score' },
-  { key: 'transactionCost', label: 'تكلفة المعاملات', description: 'نسبة تكلفة تنفيذ كل صفقة (عمولة الوسيط)', min: 0, max: 0.05, step: 0.0005, unit: '%', group: 'محرك Optimum Score' },
+  // أوزان محرك OS
+  { key: 'alpha', label: 'α وزن شارب', description: 'وزن نسبة شارب (عائد معدل بالمخاطر) في OS', min: 0, max: 0.5, step: 0.05, unit: '', group: 'أوزان محرك OS' },
+  { key: 'beta', label: 'β وزن Z-Score المعدّل', description: 'وزن الانحراف عن المتوسط (معدّل بالاتجاه)', min: 0, max: 0.5, step: 0.05, unit: '', group: 'أوزان محرك OS' },
+  { key: 'delta', label: 'δ وزن الاتجاه', description: 'وزن مؤشر الاتجاه (فوق/تحت المتوسط المتحرك)', min: 0, max: 0.5, step: 0.05, unit: '', group: 'أوزان محرك OS' },
+  { key: 'epsilon', label: 'ε وزن RSI', description: 'وزن مؤشر القوة النسبية (تشبع بيعي/شرائي)', min: 0, max: 0.5, step: 0.05, unit: '', group: 'أوزان محرك OS' },
+  { key: 'zeta', label: 'ζ وزن الزخم', description: 'وزن معدل تغير السعر (Momentum)', min: 0, max: 0.5, step: 0.05, unit: '', group: 'أوزان محرك OS' },
+  { key: 'eta', label: 'η وزن MACD', description: 'وزن مؤشر MACD (تقاطع المتوسطات)', min: 0, max: 0.5, step: 0.05, unit: '', group: 'أوزان محرك OS' },
+  { key: 'gamma', label: 'γ وزن التكلفة', description: 'وزن تكلفة المعاملات', min: 0, max: 0.3, step: 0.05, unit: '', group: 'أوزان محرك OS' },
+
+  // معاملات أساسية
+  { key: 'riskFreeRate', label: 'العائد الخالي من المخاطر', description: 'معدل العائد السنوي الخالي من المخاطر', min: 0, max: 0.2, step: 0.005, unit: '%', group: 'معاملات أساسية' },
+  { key: 'transactionCost', label: 'تكلفة المعاملات', description: 'نسبة عمولة الوسيط لكل صفقة', min: 0, max: 0.05, step: 0.0005, unit: '%', group: 'معاملات أساسية' },
+  { key: 'sigmoidK', label: 'حساسية Sigmoid (k)', description: 'كلما زاد k زادت حساسية OS حول الوسط', min: 1, max: 5, step: 0.5, unit: '', group: 'معاملات أساسية' },
 
   // عتبات الإشارات
-  { key: 'buyThreshold', label: 'عتبة الشراء', description: 'عندما يكون OS أكبر من أو يساوي هذه القيمة → إشارة شراء', min: 0.5, max: 0.95, step: 0.05, unit: '', group: 'عتبات الإشارات' },
-  { key: 'sellThreshold', label: 'عتبة البيع', description: 'عندما يكون OS أقل من أو يساوي هذه القيمة → إشارة بيع', min: 0.05, max: 0.5, step: 0.05, unit: '', group: 'عتبات الإشارات' },
-
-  // Z-Score
-  { key: 'zScoreStrongBuy', label: 'Z-Score شراء قوي', description: 'عندما يكون Z-Score أقل من هذه القيمة → فرصة شراء قوية', min: -5, max: 0, step: 0.5, unit: '', group: 'عتبات الإشارات' },
-  { key: 'zScoreStrongSell', label: 'Z-Score بيع قوي', description: 'عندما يكون Z-Score أكبر من هذه القيمة → فرصة بيع قوية', min: 0, max: 5, step: 0.5, unit: '', group: 'عتبات الإشارات' },
+  { key: 'buyThreshold', label: 'عتبة الشراء', description: 'OS ≥ هذه القيمة → إشارة شراء', min: 0.5, max: 0.95, step: 0.05, unit: '', group: 'عتبات الإشارات' },
+  { key: 'sellThreshold', label: 'عتبة البيع', description: 'OS ≤ هذه القيمة → إشارة بيع', min: 0.05, max: 0.5, step: 0.05, unit: '', group: 'عتبات الإشارات' },
 
   // إعادة التوازن
-  { key: 'rebalanceThreshold', label: 'عتبة إعادة التوازن', description: 'نسبة الانحراف المسموحة قبل اقتراح إعادة التوازن', min: 0.01, max: 0.20, step: 0.01, unit: '%', group: 'إعادة التوازن' },
+  { key: 'rebalanceThreshold', label: 'عتبة إعادة التوازن', description: 'انحراف الوزن المسموح قبل الاقتراح', min: 0.01, max: 0.20, step: 0.01, unit: '%', group: 'إعادة التوازن' },
+  { key: 'forceRebalanceThreshold', label: 'عتبة إلزامية', description: 'عند هذا الانحراف يتم إصدار إشارة بيع/شراء فورية بغض النظر عن OS', min: 0.05, max: 0.30, step: 0.01, unit: '%', group: 'إعادة التوازن' },
+
+  // فترات المؤشرات
+  { key: 'rsiPeriod', label: 'فترة RSI', description: 'عدد الأيام لحساب مؤشر القوة النسبية', min: 5, max: 50, step: 1, unit: 'يوم', group: 'فترات المؤشرات' },
+  { key: 'maPeriod', label: 'فترة المتوسط المتحرك', description: 'عدد الأيام للمتوسط المتحرك (MA) لتحديد الاتجاه', min: 10, max: 200, step: 5, unit: 'يوم', group: 'فترات المؤشرات' },
+  { key: 'momentumPeriod', label: 'فترة الزخم', description: 'عدد الأيام لحساب معدل تغير السعر', min: 5, max: 30, step: 1, unit: 'يوم', group: 'فترات المؤشرات' },
+  { key: 'macdFast', label: 'MACD السريع', description: 'فترة المتوسط السريع لـ MACD', min: 5, max: 20, step: 1, unit: 'يوم', group: 'فترات المؤشرات' },
+  { key: 'macdSlow', label: 'MACD البطيء', description: 'فترة المتوسط البطيء لـ MACD', min: 15, max: 50, step: 1, unit: 'يوم', group: 'فترات المؤشرات' },
+  { key: 'macdSignal', label: 'MACD الإشارة', description: 'فترة خط إشارة MACD', min: 5, max: 20, step: 1, unit: 'يوم', group: 'فترات المؤشرات' },
+
+  // Trailing Stop
+  { key: 'trailingStopProfitTrigger', label: 'تفعيل Trailing Stop', description: 'نسبة الربح غير المحقق التي تفعّل وقف الخسارة المتحرك', min: 0.05, max: 0.50, step: 0.05, unit: '%', group: 'وقف الخسارة المتحرك' },
+  { key: 'trailingStopDistance', label: 'مسافة Trailing Stop', description: 'نسبة الانخفاض من أعلى سعر التي تطلق إشارة بيع', min: 0.03, max: 0.25, step: 0.01, unit: '%', group: 'وقف الخسارة المتحرك' },
 
   // حجم الصفقة
   { key: 'buyOrderCashRatio', label: 'نسبة النقد للشراء', description: 'نسبة النقد المتاح المستخدم في كل أمر شراء', min: 0.05, max: 1, step: 0.05, unit: '%', group: 'حجم الصفقة' },
   { key: 'sellMode', label: 'أسلوب البيع', description: 'الأسلوب الافتراضي لحساب كمية البيع', min: 0, max: 3, step: 1, unit: '', group: 'حجم الصفقة' },
 
-  // المؤشرات
-  { key: 'rsiPeriod', label: 'فترة RSI', description: 'عدد الأيام لحساب مؤشر القوة النسبية', min: 5, max: 50, step: 1, unit: 'يوم', group: 'المؤشرات الفنية' },
-  { key: 'tradingDaysPerYear', label: 'أيام التداول السنوية', description: 'عدد أيام التداول في السنة (لتقييس العوائد والتقلبات)', min: 200, max: 365, step: 1, unit: 'يوم', group: 'المؤشرات الفنية' },
-
-  // باك تيست
-  { key: 'backtestLookback', label: 'نافذة المراجعة', description: 'عدد الأيام التاريخية المستخدمة لحساب الإشارات في الباك تيست', min: 10, max: 200, step: 5, unit: 'يوم', group: 'الباك تيست' },
-  { key: 'backtestBuyRatio', label: 'نسبة الشراء', description: 'نسبة النقد المستخدم في كل عملية شراء أثناء الباك تيست', min: 0.1, max: 1, step: 0.05, unit: '%', group: 'الباك تيست' },
-  { key: 'backtestSellRatio', label: 'نسبة البيع', description: 'نسبة المركز المباع في كل عملية بيع أثناء الباك تيست', min: 0.1, max: 1, step: 0.05, unit: '%', group: 'الباك تيست' },
-
-  // Monte Carlo
-  { key: 'monteCarloIterations', label: 'تكرارات Monte Carlo', description: 'عدد التكرارات لتحسين الأوزان (أكثر = أدق لكن أبطأ)', min: 1000, max: 100000, step: 1000, unit: 'تكرار', group: 'تحسين الأوزان' },
+  // عام
+  { key: 'tradingDaysPerYear', label: 'أيام التداول السنوية', description: 'عدد أيام التداول في السنة', min: 200, max: 365, step: 1, unit: 'يوم', group: 'عام' },
+  { key: 'backtestLookback', label: 'نافذة المراجعة', description: 'عدد الأيام التاريخية للباك تيست', min: 10, max: 200, step: 5, unit: 'يوم', group: 'الباك تيست' },
+  { key: 'backtestBuyRatio', label: 'نسبة الشراء', description: 'نسبة النقد في كل شراء بالباك تيست', min: 0.1, max: 1, step: 0.05, unit: '%', group: 'الباك تيست' },
+  { key: 'backtestSellRatio', label: 'نسبة البيع', description: 'نسبة المركز في كل بيع بالباك تيست', min: 0.1, max: 1, step: 0.05, unit: '%', group: 'الباك تيست' },
+  { key: 'monteCarloIterations', label: 'تكرارات Monte Carlo', description: 'عدد التكرارات لتحسين الأوزان', min: 1000, max: 100000, step: 1000, unit: 'تكرار', group: 'تحسين الأوزان' },
 ];
 
 // أسماء الأنماط بالعربية

@@ -18,7 +18,7 @@ export default function SignalsPage() {
       const prices = getPriceList(a.id);
       if (prices.length < 10) return null;
       const effectiveSettings = getEffectiveSettings(a.id);
-      return analyzeAsset(a.name, a.id, a.currentPrice, prices, a.quantity, totalValue, a.targetWeight, cash, effectiveSettings);
+      return analyzeAsset(a.name, a.id, a.currentPrice, prices, a.quantity, totalValue, a.targetWeight, cash, a.purchasePrice, effectiveSettings);
     }).filter(Boolean) as TradingSignal[];
   }, [assets, totalValue, cash]);
 
@@ -122,12 +122,38 @@ function SignalCard({ signal: s, onClick }: { signal: TradingSignal; onClick: ()
         </div>
       </div>
 
-      {/* المؤشرات */}
-      <div className="flex justify-around mt-3 pt-3 border-t border-gray-100 text-center text-xs">
-        <div><div className="font-bold">{s.optimumScore.toFixed(2)}</div><div className="text-gray-400">OS</div></div>
-        <div><div className="font-bold">{s.zScore.toFixed(2)}</div><div className="text-gray-400">Z-Score</div></div>
-        <div><div className="font-bold">{(s.expectedReturn * 100).toFixed(1)}%</div><div className="text-gray-400">العائد</div></div>
-        <div><div className="font-bold">{(s.volatility * 100).toFixed(1)}%</div><div className="text-gray-400">التقلب</div></div>
+      {/* درجة الثقة */}
+      {s.signalType !== 'none' && (
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-xs text-gray-400">الثقة:</span>
+          <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div className="h-full rounded-full" style={{
+              width: `${s.confidence * 100}%`,
+              background: s.confidence >= 0.7 ? '#22c55e' : s.confidence >= 0.5 ? '#f59e0b' : '#ef4444',
+            }} />
+          </div>
+          <span className={`text-xs font-bold ${s.confidence >= 0.7 ? 'text-green-600' : s.confidence >= 0.5 ? 'text-yellow-600' : 'text-red-600'}`}>
+            {(s.confidence * 100).toFixed(0)}%
+          </span>
+          {s.signalSource !== 'os' && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">
+              {s.signalSource === 'trailing_stop' ? 'وقف خسارة' : 'إعادة توازن'}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* العوامل */}
+      <div className="flex flex-wrap justify-around mt-3 pt-3 border-t border-gray-100 text-center text-xs gap-y-2">
+        <div><div className="font-bold">{(s.optimumScore * 100).toFixed(0)}%</div><div className="text-gray-400">OS</div></div>
+        <div><div className={`font-bold ${s.factors.trend > 0 ? 'text-green-600' : s.factors.trend < 0 ? 'text-red-600' : ''}`}>
+          {s.factors.trend > 0 ? '↑' : s.factors.trend < 0 ? '↓' : '→'}</div><div className="text-gray-400">الاتجاه</div></div>
+        <div><div className={`font-bold ${s.factors.rsi < 30 ? 'text-green-600' : s.factors.rsi > 70 ? 'text-red-600' : ''}`}>
+          {s.factors.rsi.toFixed(0)}</div><div className="text-gray-400">RSI</div></div>
+        <div><div className="font-bold">{s.factors.zScoreAdj.toFixed(2)}</div><div className="text-gray-400">Z_adj</div></div>
+        <div><div className={`font-bold ${s.factors.momentum > 0 ? 'text-green-600' : s.factors.momentum < 0 ? 'text-red-600' : ''}`}>
+          {(s.factors.momentum * 100).toFixed(0)}%</div><div className="text-gray-400">الزخم</div></div>
+        <div><div className="font-bold">{(s.factors.sharpe).toFixed(2)}</div><div className="text-gray-400">شارب</div></div>
       </div>
 
       {/* الأسباب */}
@@ -168,13 +194,26 @@ function SignalDetail({ signal: s, onClose, onTrade }: { signal: TradingSignal; 
           </div>
         </div>
 
+        {/* بطاقة العوامل */}
+        <div className="mb-4">
+          <div className="text-xs font-bold mb-2 text-gray-500">العوامل المؤثرة في القرار:</div>
+          <div className="grid grid-cols-3 gap-1.5 text-xs">
+            <FactorBadge label="Sharpe" value={s.factors.sharpe} fmt={v => v.toFixed(2)} positive={v => v > 0} />
+            <FactorBadge label="Z_adj" value={s.factors.zScoreAdj} fmt={v => v.toFixed(2)} positive={v => v < 0} />
+            <FactorBadge label="الاتجاه" value={s.factors.trend} fmt={v => v > 0 ? '↑ صاعد' : v < 0 ? '↓ هابط' : '→ محايد'} positive={v => v > 0} />
+            <FactorBadge label="RSI" value={s.factors.rsi} fmt={v => v.toFixed(0)} positive={v => v < 30} negative={v => v > 70} />
+            <FactorBadge label="الزخم" value={s.factors.momentum} fmt={v => (v * 100).toFixed(0) + '%'} positive={v => v > 0} />
+            <FactorBadge label="MACD" value={s.factors.macd} fmt={v => (v * 100).toFixed(0) + '%'} positive={v => v > 0} />
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 gap-2 text-sm mb-4">
           <div className="flex justify-between"><span>السعر الحالي:</span><b>${s.currentPrice.toFixed(2)}</b></div>
-          <div className="flex justify-between"><span>Optimum Score:</span><b>{s.optimumScore.toFixed(4)}</b></div>
-          <div className="flex justify-between"><span>Z-Score:</span><b>{s.zScore.toFixed(2)}</b></div>
+          <div className="flex justify-between"><span>OS:</span><b>{(s.optimumScore * 100).toFixed(0)}% (ثقة {(s.confidence * 100).toFixed(0)}%)</b></div>
           <div className="flex justify-between"><span>الوزن الحالي:</span><b>{(s.currentWeight * 100).toFixed(1)}%</b></div>
           <div className="flex justify-between"><span>الوزن المستهدف:</span><b>{(s.targetWeight * 100).toFixed(1)}%</b></div>
-          <div className="flex justify-between"><span>العائد المتوقع:</span><b>{(s.expectedReturn * 100).toFixed(1)}%</b></div>
+          <div className="flex justify-between"><span>MA{50}:</span><b>${s.factors.ma50.toFixed(2)}</b></div>
+          <div className="flex justify-between"><span>العائد السنوي:</span><b>{(s.expectedReturn * 100).toFixed(1)}%</b></div>
         </div>
 
         {s.signalType !== 'none' && (
@@ -192,6 +231,23 @@ function SignalDetail({ signal: s, onClose, onTrade }: { signal: TradingSignal; 
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function FactorBadge({ label, value, fmt, positive, negative }: {
+  label: string; value: number;
+  fmt: (v: number) => string;
+  positive: (v: number) => boolean;
+  negative?: (v: number) => boolean;
+}) {
+  const isPos = positive(value);
+  const isNeg = negative ? negative(value) : !isPos;
+  const bg = isPos ? 'bg-green-50 text-green-700' : isNeg ? 'bg-red-50 text-red-700' : 'bg-gray-50 text-gray-600';
+  return (
+    <div className={`p-1.5 rounded text-center ${bg}`}>
+      <div className="font-bold">{fmt(value)}</div>
+      <div className="text-[10px] opacity-70">{label}</div>
     </div>
   );
 }
