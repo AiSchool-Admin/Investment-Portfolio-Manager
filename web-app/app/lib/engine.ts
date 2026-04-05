@@ -427,6 +427,8 @@ export function runBacktest(
   let cash = initialCapital, holdings = 0;
   const trades: BacktestTrade[] = [];
   const equityCurve: number[] = [initialCapital];
+  let lastTradeDay = -999; // فترة انتظار بين الصفقات
+  const cooldownDays = 5;  // انتظار 5 أيام على الأقل بين الصفقات
 
   for (let i = lookback; i < prices.length; i++) {
     const window = prices.slice(Math.max(0, i - lookback), i);
@@ -450,18 +452,25 @@ export function runBacktest(
 
     const os = computeOptimumScore(shr, zAdj, trend, rsiSig, mom, macdSig, lowVolSig, cost, settings);
 
-    if (os >= buyThreshold && trend >= 0 && rsiSig >= -0.5 && cash > 0) {
+    const daysSinceLastTrade = i - lastTradeDay;
+
+    // شراء: OS مرتفع + اتجاه غير هابط + RSI مناسب + cooldown
+    if (os >= buyThreshold && trend >= 0 && rsiSig >= -0.5 && cash > 0 && daysSinceLastTrade >= cooldownDays) {
       const invest = cash * backtestBuyRatio;
       const qty = invest / cp;
       cash -= invest + invest * cost;
       holdings += qty;
       trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os });
-    } else if (os <= sellThreshold && trend <= 0 && rsiSig <= 0.5 && holdings > 0) {
+      lastTradeDay = i;
+    }
+    // بيع: OS منخفض + اتجاه غير صاعد + RSI مناسب + cooldown
+    else if (os <= sellThreshold && trend <= 0 && rsiSig <= 0.5 && holdings > 0 && daysSinceLastTrade >= cooldownDays) {
       const qty = holdings * backtestSellRatio;
       const val = qty * cp;
       cash += val - val * cost;
       holdings -= qty;
       trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex: i, os });
+      lastTradeDay = i;
     }
     equityCurve.push(cash + holdings * cp);
   }
