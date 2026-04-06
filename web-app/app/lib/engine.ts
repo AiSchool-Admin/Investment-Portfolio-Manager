@@ -712,9 +712,12 @@ export function runBacktest(
       else break;
     }
 
-    // تصنيف السوق (20 يوم تأكيد - ثبت أنه أفضل من 12)
-    const isConfirmedTrend = adx >= 25 && consecutiveTrendDays >= 20;
-    const isRanging = adx < 25 || consecutiveTrendDays < 15;
+    // === تصنيف السوق (Gemini: فلتر ديناميكي حسب قوة ADX) ===
+    // ADX > 35 = زخم انفجاري → 7 أيام تأكيد فقط
+    // ADX 25-35 = اتجاه عادي → 20 يوم تأكيد
+    const confirmDays = adx >= 35 ? 15 : 20;
+    const isConfirmedTrend = adx >= 25 && consecutiveTrendDays >= confirmDays;
+    const isRanging = adx < 25 || consecutiveTrendDays < Math.min(10, confirmDays);
 
     const displayOS = isConfirmedTrend ? (cp > smaSlow ? 0.8 : 0.2) : 0.5;
 
@@ -759,13 +762,17 @@ export function runBacktest(
     if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuyCondition = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
 
-      // Pyramiding (Gemini): 40% أولى + 20% + 15% = حد أقصى 75%
-      const maxPyramidExtended = 3;
-      const pyramidPct = pyramidCount === 0 ? 0.40 : (pyramidCount === 1 ? 0.20 : 0.15);
+      // Pyramiding هجومي (Gemini):
+      // الدفعة الأولى: 60% من النقد (دخول قوي)
+      // التعزيز: 40% المتبقية عند صعود 5% (Momentum Entry)
+      const maxPyramidExtended = 2;
+      const pyramidPct = pyramidCount === 0 ? 0.60 : 1.0; // الثانية = كل المتبقي
       const canBuy = pyramidCount < maxPyramidExtended;
-      const extraConfirm = pyramidCount >= 2 ? consecutiveTrendDays >= 25 : true;
+      // التعزيز: فقط إذا السعر ارتفع 5% عن سعر الدخول
+      const momentumConfirm = pyramidCount === 0 ? true :
+        (avgBuyPrice > 0 && (cp - avgBuyPrice) / avgBuyPrice >= 0.05);
 
-      if (trendBuyCondition && cash > 0 && canBuy && extraConfirm) {
+      if (trendBuyCondition && cash > 0 && canBuy && momentumConfirm) {
         const invest = cash * pyramidPct;
         const qty = invest / cp;
         avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
@@ -796,14 +803,15 @@ export function runBacktest(
       }
     }
 
-    // ===== الاستراتيجية B: الارتداد + شرط السعر فوق SMA_slow =====
+    // ===== الاستراتيجية B: القناص في التذبذب (Gemini Active Ranging) =====
     if (isRanging && daysSinceLastTrade >= cooldownDays) {
-      // تأكيد ثلاثي + السعر فوق SMA_slow (يمنع الشراء في الهابط)
-      const tripleConfirm = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
-      const notInDowntrend = cp > smaSlow; // DeepSeek: لا تشتري في هبوط عام
+      // شراء هجومي: Z-Score < -2 أو (Z < -1.5 + RSI < 30 + Bollinger السفلي)
+      const aggressiveEntry = zScore < -2 && cp <= bb.lower;
+      const standardEntry = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
+      const notInDowntrend = cp > smaSlow;
 
-      if (position === 'none' && tripleConfirm && notInDowntrend && cash > 0) {
-        const invest = cash * pyramidRatio;
+      if (position === 'none' && (aggressiveEntry || standardEntry) && notInDowntrend && cash > 0) {
+        const invest = cash * 0.30; // Gemini: 30% من المحفظة
         const qty = invest / cp;
         avgBuyPrice = cp;
         cash -= invest + invest * cost;
@@ -812,10 +820,10 @@ export function runBacktest(
         trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
         lastTradeDay = i;
       }
-      // بيع: Bollinger العلوي أو ربح 10%
+      // بيع سريع: Bollinger العلوي أو ربح 5% (Gemini: خروج سريع)
       else if (position === 'long') {
         const gain = avgBuyPrice > 0 ? (cp - avgBuyPrice) / avgBuyPrice : 0;
-        if (cp >= bb.upper || gain >= 0.10) {
+        if (cp >= bb.upper || gain >= 0.05) {
           const val = holdings * cp;
           cash += val - val * cost;
           trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });

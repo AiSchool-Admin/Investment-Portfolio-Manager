@@ -168,8 +168,9 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
       else break;
     }
 
-    const isConfirmedTrend = adx >= 25 && consecutiveTrendDays >= 20;
-    const isRanging = adx < 25 || consecutiveTrendDays < 15;
+    const confirmDays = adx >= 35 ? 15 : 20;
+    const isConfirmedTrend = adx >= 25 && consecutiveTrendDays >= confirmDays;
+    const isRanging = adx < 25 || consecutiveTrendDays < Math.min(10, confirmDays);
 
     // تتبع القمة
     if (position === 'long' && cp > peakPrice) peakPrice = cp;
@@ -203,11 +204,12 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
     // Trend Following + Pyramiding تدريجي
     if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuy = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
-      const maxPE = 3;
-      const pPct = pyramidCount === 0 ? 0.40 : (pyramidCount === 1 ? 0.20 : 0.15);
-      const extraOK = pyramidCount >= 2 ? consecutiveTrendDays >= 25 : true;
+      const maxPE = 2;
+      const pPct = pyramidCount === 0 ? 0.60 : 1.0;
+      const momOK = pyramidCount === 0 ? true :
+        (avgBuyPrice > 0 && (cp - avgBuyPrice) / avgBuyPrice >= 0.05);
 
-      if (trendBuy && cash > 0 && pyramidCount < maxPE && extraOK) {
+      if (trendBuy && cash > 0 && pyramidCount < maxPE && momOK) {
         peakPrice = Math.max(peakPrice, cp);
         const invest = cash * pPct;
         const qty = invest / cp;
@@ -233,12 +235,13 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
       }
     }
 
-    // Mean Reversion + Triple Confirmation + NOT in downtrend
+    // Mean Reversion القناص (Gemini Active Ranging)
     if (isRanging && daysSinceLastTrade >= cooldownDays) {
-      const tripleConfirm = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
+      const aggressiveEntry = zScore < -2 && cp <= bb.lower;
+      const standardEntry = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
       const notInDowntrend = cp > smaSlow;
-      if (position === 'none' && tripleConfirm && notInDowntrend && cash > 0) {
-        const invest = cash * pyramidRatio;
+      if (position === 'none' && (aggressiveEntry || standardEntry) && notInDowntrend && cash > 0) {
+        const invest = cash * 0.30; // Gemini: 30%
         const qty = invest / cp;
         avgBuyPrice = cp;
         cash -= invest + invest * cost;
@@ -248,7 +251,7 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
         lastTradeDay = i;
       } else if (position === 'long') {
         const gain = avgBuyPrice > 0 ? (cp - avgBuyPrice) / avgBuyPrice : 0;
-        if (cp >= bb.upper || gain >= 0.10) {
+        if (cp >= bb.upper || gain >= 0.05) { // Gemini: خروج سريع 5%
           const val = holdings * cp;
           cash += val - val * cost;
           trades.push({ type: 'sell(MR)', price: cp, dayIndex: i, quantity: holdings, value: val });
