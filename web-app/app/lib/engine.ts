@@ -46,11 +46,18 @@ export function calculateMA(prices: number[], period: number): number {
 export function calculateTrendStrength(currentPrice: number, ma: number): number {
   if (ma === 0) return 0;
   const raw = (currentPrice - ma) / ma;
-  return Math.max(0, Math.min(1, raw)); // مقيد بين 0 و 1
+  // تضخيم: ×5 لجعل انحرافات صغيرة (3%) تعطي تأثير كبير (15%)
+  return Math.max(0, Math.min(1, raw * 5));
 }
 
 export function calculateZScoreAdj(zScore: number, trendStrength: number): number {
-  return zScore * (1 - trendStrength);
+  // في الاتجاه الصاعد القوي: Z-Score الإيجابي يُخفَّض بشكل كبير
+  // trendStrength = 0.5 → Z يُخفَّض 50%
+  // trendStrength = 1.0 → Z يُخفَّض 100% (يصبح صفر)
+  const dampened = zScore * (1 - trendStrength);
+  // لا نسمح لـ Z_adj أن يكون أكثر من 1.5 في الاتجاه الصاعد
+  if (trendStrength > 0.2 && dampened > 1.5) return 1.5;
+  return dampened;
 }
 
 export function calculateTrend(currentPrice: number, ma: number): number {
@@ -476,11 +483,14 @@ export function analyzeAsset(
   let suggestedQuantity = 0, suggestedValue = 0;
   const reasons: string[] = [];
 
-  // 0. وقف خسارة ثابت (Hard Stop Loss)
-  if (s.hardStopLossEnabled && lossPct >= s.hardStopLossPercent && quantityHeld > 0) {
+  // 0. وقف خسارة ديناميكي (حسب نوع السوق)
+  const dynamicStopLoss = regime === 'ranging'
+    ? Math.max(s.hardStopLossPercent * 2, vol / Math.sqrt(s.tradingDaysPerYear) * 5)
+    : s.hardStopLossPercent;
+  if (s.hardStopLossEnabled && lossPct >= dynamicStopLoss && quantityHeld > 0) {
     signalType = 'sell';
     signalSource = 'trailing_stop';
-    reasons.push(`وقف خسارة: انخفض ${(lossPct * 100).toFixed(1)}% عن سعر الشراء (حد ${(s.hardStopLossPercent * 100).toFixed(0)}%)`);
+    reasons.push(`وقف خسارة: انخفض ${(lossPct * 100).toFixed(1)}% (حد ${(dynamicStopLoss * 100).toFixed(0)}% - ${regime === 'ranging' ? 'ديناميكي' : 'ثابت'})`);
     const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, 'all');
     suggestedQuantity = order.quantity;
     suggestedValue = order.value;
@@ -500,55 +510,69 @@ export function analyzeAsset(
     }
   }
 
-  // 2. إشارات OS المشروطة (حسب نوع السوق)
-  if (signalType === 'none') {
-    if (regime === 'trending') {
-      // === سوق ذو اتجاه: الشروط الأصلية ===
-      if (os >= buyTh && trend >= 0 && rsiSig >= -0.5) {
-        signalType = 'buy';
-        reasons.push(`[اتجاه ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% ≥ ${(buyTh * 100).toFixed(0)}%`);
-        if (trend > 0) reasons.push(`الاتجاه صاعد (فوق MA${s.maPeriod})`);
-        const order = calculateBuyOrder(targetWeight, currentWeight, effPV, availableCash, currentPrice, s.buyOrderCashRatio);
-        suggestedQuantity = order.quantity; suggestedValue = order.value;
-        if (suggestedQuantity <= 0) reasons.push('لا حاجة للشراء - الوزن متوافق أو لا يوجد نقد كافٍ');
-      } else if (os <= sellTh && trend <= 0 && rsiSig <= 0.5) {
-        signalType = 'sell';
-        reasons.push(`[اتجاه ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% ≤ ${(sellTh * 100).toFixed(0)}%`);
-        if (trend < 0) reasons.push(`الاتجاه هابط (تحت MA${s.maPeriod})`);
-        const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, s.sellMode);
-        suggestedQuantity = order.quantity; suggestedValue = order.value;
-      } else {
-        reasons.push(`[اتجاه ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% - انتظار`);
-        if (os >= buyTh && trend < 0) reasons.push(`OS مرتفع لكن الاتجاه هابط`);
-        if (os <= sellTh && trend > 0) reasons.push(`OS منخفض لكن الاتجاه صاعد`);
-      }
-    } else {
-      // === سوق متذبذب: شراء عند الدعم، بيع عند المقاومة ===
-      const nearSupport = bb.percentB < 0.2 || zScoreAdj < -1.5;
-      const nearResistance = bb.percentB > 0.8 || zScoreAdj > 1.5;
+  // 2. جني أرباح عند 15% + Z إيجابي
+  if (signalType === 'none' && profitPct >= 0.15 && zScoreAdj > 0.5 && quantityHeld > 0) {
+    signalType = 'sell';
+    signalSource = 'os';
+    reasons.push(`جني أرباح: ربح ${(profitPct * 100).toFixed(1)}% + Z_adj ${zScoreAdj.toFixed(2)} > 0.5 (سعر فوق المتوسط)`);
+    const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, 'half');
+    suggestedQuantity = order.quantity;
+    suggestedValue = order.value;
+  }
 
-      if (os >= buyTh && nearSupport) {
-        signalType = 'buy';
-        reasons.push(`[متذبذب ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% + سعر قرب الدعم`);
-        if (bb.percentB < 0.2) reasons.push(`Bollinger: السعر عند الحد السفلي ($${bb.lower.toFixed(2)})`);
-        if (zScoreAdj < -1.5) reasons.push(`Z-Score ${zScoreAdj.toFixed(2)} ← أقل من المتوسط`);
-        if (rsi < 30) reasons.push(`RSI ${rsi.toFixed(0)} → تشبع بيعي`);
-        const order = calculateBuyOrder(targetWeight, currentWeight, effPV, availableCash, currentPrice, s.buyOrderCashRatio);
-        suggestedQuantity = order.quantity; suggestedValue = order.value;
-        if (suggestedQuantity <= 0) reasons.push('لا حاجة للشراء - الوزن متوافق أو لا يوجد نقد كافٍ');
-      } else if (os <= sellTh && nearResistance && quantityHeld > 0) {
-        signalType = 'sell';
-        reasons.push(`[متذبذب ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% + سعر قرب المقاومة`);
-        if (bb.percentB > 0.8) reasons.push(`Bollinger: السعر عند الحد العلوي ($${bb.upper.toFixed(2)})`);
-        if (zScoreAdj > 1.5) reasons.push(`Z-Score ${zScoreAdj.toFixed(2)} ← أعلى من المتوسط`);
-        if (rsi > 70) reasons.push(`RSI ${rsi.toFixed(0)} → تشبع شرائي`);
-        const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, s.sellMode);
-        suggestedQuantity = order.quantity; suggestedValue = order.value;
+  // 3. شراء - طريقتان:
+  //    أ) Mean Reversion: خوف شديد (Z منخفض، RSI منخفض، Bollinger منخفض)
+  //    ب) Trend Following: اتجاه صاعد قوي ومستمر (للأصول الصاعدة بثبات)
+  if (signalType === 'none') {
+    const deepValue = zScoreAdj < -1.5;
+    const oversold = rsi < 30;
+    const nearBollingerLow = bb.percentB < 0.15;
+    const strongOS = os >= s.buyThreshold;
+
+    // اتجاه صاعد قوي: فوق MA + شارب إيجابي + زخم إيجابي
+    const strongUptrend = trend > 0 && shr > 0.5 && momentum > 0 && adx >= 20;
+
+    if (strongOS && (deepValue || oversold || nearBollingerLow || strongUptrend)) {
+      signalType = 'buy';
+      if (strongUptrend && !deepValue && !oversold && !nearBollingerLow) {
+        reasons.push(`OS ${(os * 100).toFixed(0)}% + اتجاه صاعد قوي (Sharpe ${shr.toFixed(2)}, ADX ${adx.toFixed(0)})`);
+        reasons.push(`شراء اتباع الاتجاه (Trend Following)`);
       } else {
-        reasons.push(`[متذبذب ADX=${adx.toFixed(0)}] OS ${(os * 100).toFixed(0)}% - انتظار`);
-        if (!nearSupport && os >= buyTh) reasons.push(`OS مرتفع لكن السعر ليس قرب الدعم`);
-        if (!nearResistance && os <= sellTh) reasons.push(`OS منخفض لكن السعر ليس قرب المقاومة`);
+        reasons.push(`OS ${(os * 100).toFixed(0)}% ≥ ${(s.buyThreshold * 100).toFixed(0)}% [${regime}]`);
       }
+      if (deepValue) reasons.push(`Z_adj ${zScoreAdj.toFixed(2)} ← سعر أقل بكثير من المتوسط (فرصة)`);
+      if (oversold) reasons.push(`RSI ${rsi.toFixed(0)} ← تشبع بيعي شديد`);
+      if (nearBollingerLow) reasons.push(`Bollinger ${(bb.percentB * 100).toFixed(0)}% ← قرب الدعم`);
+      if (trend > 0) reasons.push(`الاتجاه صاعد (فوق MA${s.maPeriod})`);
+      const order = calculateBuyOrder(targetWeight, currentWeight, effPV, availableCash, currentPrice, s.buyOrderCashRatio);
+      suggestedQuantity = order.quantity;
+      suggestedValue = order.value;
+      if (suggestedQuantity <= 0) reasons.push('لا حاجة للشراء - الوزن متوافق أو لا يوجد نقد كافٍ');
+    }
+    // 4. بيع عند الطمع الشديد
+    //    OS منخفض + (سعر مرتفع جداً أو RSI مرتفع) = فرصة بيع
+    else if (os <= s.sellThreshold && quantityHeld > 0) {
+      const overvalued = zScoreAdj > 1.5;
+      const overbought = rsi > 70;
+      const nearBollingerHigh = bb.percentB > 0.85;
+
+      if (overvalued || overbought || nearBollingerHigh) {
+        signalType = 'sell';
+        reasons.push(`OS ${(os * 100).toFixed(0)}% ≤ ${(s.sellThreshold * 100).toFixed(0)}% [${regime}]`);
+        if (overvalued) reasons.push(`Z_adj ${zScoreAdj.toFixed(2)} ← سعر أعلى بكثير من المتوسط`);
+        if (overbought) reasons.push(`RSI ${rsi.toFixed(0)} ← تشبع شرائي`);
+        if (nearBollingerHigh) reasons.push(`Bollinger ${(bb.percentB * 100).toFixed(0)}% ← قرب المقاومة`);
+        const order = calculateSellOrder(quantityHeld, currentPrice, currentWeight, targetWeight, effPV, s.sellMode);
+        suggestedQuantity = order.quantity;
+        suggestedValue = order.value;
+      } else {
+        reasons.push(`OS ${(os * 100).toFixed(0)}% منخفض لكن بدون تأكيد (Z/RSI/Bollinger)`);
+      }
+    }
+    // 5. لا إشارة
+    else {
+      reasons.push(`OS ${(os * 100).toFixed(0)}% [${regime}] - انتظار`);
+      if (deepValue && !strongOS) reasons.push(`سعر منخفض لكن OS غير كافٍ`);
     }
   }
 
@@ -611,133 +635,121 @@ export function optimizeWeights(
   return bestWeights;
 }
 
-// ============ باك تيست (محسّن) ============
+// ============ SMA - المتوسط المتحرك البسيط ============
+
+export function calculateSMA(prices: number[], period: number): number {
+  if (prices.length < period) return prices.length > 0 ? mean(prices) : 0;
+  return mean(prices.slice(-period));
+}
+
+// ============ باك تيست - استراتيجية مزدوجة ============
+// A: Trend Following (ADX ≥ 25) → SMA200/50 crossover
+// B: Mean Reversion (ADX < 20) → Bollinger + RSI
 
 export function runBacktest(
   prices: number[], initialCapital: number, settings: SystemSettings,
 ): BacktestResult {
-  const { riskFreeRate: rf, transactionCost: cost, backtestLookback: lookback,
-    buyThreshold, sellThreshold, backtestBuyRatio, backtestSellRatio, tradingDaysPerYear } = settings;
+  const { transactionCost: cost } = settings;
 
-  if (prices.length < lookback + 1) {
+  if (prices.length < 30) {
     return { totalReturn: 0, buyAndHoldReturn: 0, numberOfTrades: 0, winRate: 0, trades: [], equityCurve: [initialCapital] };
   }
 
   let cash = initialCapital, holdings = 0;
-  let avgBuyPrice = 0; // متوسط سعر الشراء (لوقف الخسارة)
+  let avgBuyPrice = 0;
+  let position: 'none' | 'long' = 'none';
   const trades: BacktestTrade[] = [];
   const equityCurve: number[] = [initialCapital];
-  let lastTradeDay = -999;
-  const cooldownDays = 5;
+  let lastTradeDay = -20;
+  const cooldownDays = 10;
 
-  for (let i = lookback; i < prices.length; i++) {
-    const window = prices.slice(Math.max(0, i - lookback), i);
-    const allPricesSoFar = prices.slice(0, i + 1);
+  // نحتاج 30 يوم على الأقل لحساب المؤشرات
+  const startDay = 30;
+
+  for (let i = startDay; i < prices.length; i++) {
     const cp = prices[i];
-    const ret = calculateReturns(window);
-    const er = expectedReturn(ret, tradingDaysPerYear);
-    const v = volatility(ret, tradingDaysPerYear);
-    const shr = sharpeRatio(er, rf, v);
-
-    const zScore = calculateZScore(cp, window);
-    const ma = calculateMA(window, Math.min(settings.maPeriod, window.length));
-    const ts = calculateTrendStrength(cp, ma);
-    const zAdj = calculateZScoreAdj(zScore, ts);
-    const trend = calculateTrend(cp, ma);
-    const rsi = calculateRSI(allPricesSoFar, settings.rsiPeriod);
-    const rsiSig = rsiToSignal(rsi);
-    const mom = calculateMomentum(allPricesSoFar, settings.momentumPeriod);
-    const macdRes = calculateMACD(allPricesSoFar, settings.macdFast, settings.macdSlow, settings.macdSignal);
-    const macdSig = macdToSignal(macdRes.histogram, cp);
-    const lowVolSig = lowVolatilitySignal(v);
-
-    // كشف نوع السوق
-    const adx = calculateADX(allPricesSoFar, settings.adxPeriod);
-    const regime = detectMarketRegime(allPricesSoFar, settings.adxThreshold, Math.min(settings.maPeriod, allPricesSoFar.length - 1));
-    const bb = calculateBollingerBands(allPricesSoFar, settings.bollingerPeriod, settings.bollingerStdDev);
-
-    // أوزان حسب نوع السوق
-    const effSettings = regime === 'ranging' ? {
-      ...settings,
-      alpha: settings.rangingAlpha, beta: settings.rangingBeta, delta: settings.rangingDelta,
-      epsilon: settings.rangingEpsilon, zeta: settings.rangingZeta, eta: settings.rangingEta,
-      theta: settings.rangingTheta, gamma: settings.rangingGamma,
-    } : settings;
-
-    // في السوق المتذبذب: عكس الاتجاه والزخم وMACD (mean-reversion)
-    const effTrend = regime === 'ranging' ? -trend : trend;
-    const effMom = regime === 'ranging' ? -mom : mom;
-    const effMacd = regime === 'ranging' ? -macdSig : macdSig;
-
-    const os = computeOptimumScore(shr, zAdj, effTrend, rsiSig, effMom, effMacd, lowVolSig, cost, effSettings);
-    const bTh = regime === 'ranging' ? settings.rangingBuyThreshold : buyThreshold;
-    const sTh = regime === 'ranging' ? settings.rangingSellThreshold : sellThreshold;
-
+    const allPrices = prices.slice(0, i + 1);
     const daysSinceLastTrade = i - lastTradeDay;
 
-    // 0. وقف خسارة ثابت
-    if (settings.hardStopLossEnabled && holdings > 0 && avgBuyPrice > 0) {
-      const loss = (avgBuyPrice - cp) / avgBuyPrice;
-      if (loss >= settings.hardStopLossPercent) {
+    // حساب المؤشرات الأساسية
+    const sma50 = calculateSMA(allPrices, Math.min(50, allPrices.length));
+    const sma200 = calculateSMA(allPrices, Math.min(allPrices.length, 200));
+    const adx = calculateADX(allPrices, 14);
+    const rsi = calculateRSI(allPrices, 14);
+    const bb = calculateBollingerBands(allPrices, 20, 2);
+
+    // تحديد نوع السوق
+    const isTrending = adx >= 25;
+    const isRanging = adx < 20;
+    // بين 20-25: منطقة انتظار
+
+    // OS للعرض فقط (ليس لاتخاذ القرار)
+    const displayOS = isTrending ? (cp > sma200 ? 0.8 : 0.2) : 0.5;
+
+    // ===== الاستراتيجية A: اتباع الاتجاه (ADX ≥ 25) =====
+    if (isTrending && daysSinceLastTrade >= cooldownDays) {
+
+      if (position === 'none' && cp > sma200 && cash > 0) {
+        // شراء: السعر فوق SMA200 + اتجاه قوي
+        const invest = cash * settings.backtestBuyRatio;
+        const qty = invest / cp;
+        avgBuyPrice = cp;
+        cash -= invest + invest * cost;
+        holdings += qty;
+        position = 'long';
+        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
+        lastTradeDay = i;
+      }
+      else if (position === 'long' && cp < sma50) {
+        // بيع: السعر تحت SMA50 (انعكاس)
         const val = holdings * cp;
         cash += val - val * cost;
-        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os });
-        holdings = 0; avgBuyPrice = 0; lastTradeDay = i;
-        equityCurve.push(cash);
-        continue;
+        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+        holdings = 0; avgBuyPrice = 0; position = 'none';
+        lastTradeDay = i;
       }
     }
 
-    let traded = false;
+    // ===== الاستراتيجية B: الارتداد (ADX < 20) =====
+    if (isRanging && daysSinceLastTrade >= cooldownDays) {
 
-    if (regime === 'trending') {
-      // === سوق ذو اتجاه ===
-      if (os >= bTh && trend >= 0 && rsiSig >= -0.5 && cash > 0 && daysSinceLastTrade >= cooldownDays) {
-        const invest = cash * backtestBuyRatio;
+      if (position === 'none' && cp <= bb.lower && rsi < 25 && cash > 0) {
+        // شراء: السعر تحت Bollinger السفلي + RSI < 25
+        const invest = cash * settings.backtestBuyRatio;
         const qty = invest / cp;
-        avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
+        avgBuyPrice = cp;
         cash -= invest + invest * cost;
         holdings += qty;
-        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os });
-        lastTradeDay = i; traded = true;
-      } else if (os <= sTh && trend <= 0 && rsiSig <= 0.5 && holdings > 0 && daysSinceLastTrade >= cooldownDays) {
-        const qty = holdings * backtestSellRatio;
-        const val = qty * cp;
-        cash += val - val * cost; holdings -= qty;
-        trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex: i, os });
-        lastTradeDay = i; traded = true;
+        position = 'long';
+        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
+        lastTradeDay = i;
       }
-    } else {
-      // === سوق متذبذب: شراء عند الدعم، بيع عند المقاومة ===
-      const nearSupport = bb.percentB < 0.2 || zAdj < -1.5;
-      const nearResistance = bb.percentB > 0.8 || zAdj > 1.5;
+      else if (position === 'long') {
+        const gain = avgBuyPrice > 0 ? (cp - avgBuyPrice) / avgBuyPrice : 0;
 
-      if (os >= bTh && nearSupport && cash > 0 && daysSinceLastTrade >= cooldownDays) {
-        const invest = cash * backtestBuyRatio;
-        const qty = invest / cp;
-        avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
-        cash -= invest + invest * cost;
-        holdings += qty;
-        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os });
-        lastTradeDay = i; traded = true;
-      } else if (os <= sTh && nearResistance && holdings > 0 && daysSinceLastTrade >= cooldownDays) {
-        const qty = holdings * backtestSellRatio;
-        const val = qty * cp;
-        cash += val - val * cost; holdings -= qty;
-        trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex: i, os });
-        lastTradeDay = i; traded = true;
+        // بيع: وصل Bollinger العلوي أو ربح 10%
+        if (cp >= bb.upper || gain >= 0.10) {
+          const val = holdings * cp;
+          cash += val - val * cost;
+          trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+          holdings = 0; avgBuyPrice = 0; position = 'none';
+          lastTradeDay = i;
+        }
       }
     }
 
-    if (!traded && holdings > 0 && false) { // placeholder for future logic
-      // reserved
-      const qty = holdings * backtestSellRatio;
-      const val = qty * cp;
-      cash += val - val * cost;
-      holdings -= qty;
-      trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex: i, os });
-      lastTradeDay = i;
+    // ===== وقف خسارة 10% (في كل الأحوال) =====
+    if (position === 'long' && avgBuyPrice > 0) {
+      const loss = (avgBuyPrice - cp) / avgBuyPrice;
+      if (loss >= 0.10) {
+        const val = holdings * cp;
+        cash += val - val * cost;
+        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+        holdings = 0; avgBuyPrice = 0; position = 'none';
+        lastTradeDay = i;
+      }
     }
+
     equityCurve.push(cash + holdings * cp);
   }
 
