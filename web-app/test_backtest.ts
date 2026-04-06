@@ -119,7 +119,8 @@ interface BacktestResult {
 
 function runBacktest(prices: number[], initialCapital: number): BacktestResult {
   const cost = 0.001;
-  const buyRatio = 0.3;
+  const pyramidRatio = 0.20;
+  const maxPyramid = 3;
 
   if (prices.length < 50) {
     return { totalReturn: 0, buyAndHoldReturn: 0, numberOfTrades: 0, winRate: 0, trades: [] };
@@ -128,10 +129,12 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
   const dataLength = prices.length;
   const slowPeriod = Math.min(200, Math.max(50, Math.floor(dataLength * 0.3)));
   const fastPeriod = Math.max(10, Math.floor(slowPeriod * 0.4));
+  const sma100Period = Math.min(100, Math.max(30, Math.floor(dataLength * 0.5)));
 
   let cash = initialCapital, holdings = 0;
   let avgBuyPrice = 0;
   let position: 'none' | 'long' = 'none';
+  let pyramidCount = 0;
   const trades: BacktestResult['trades'] = [];
   let lastTradeDay = -20;
   const cooldownDays = 10;
@@ -145,6 +148,7 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
 
     const smaFast = calculateSMA(allPrices, fastPeriod);
     const smaSlow = calculateSMA(allPrices, Math.min(slowPeriod, allPrices.length));
+    const sma100 = calculateSMA(allPrices, Math.min(sma100Period, allPrices.length));
     const rsi = calculateRSI(allPrices, 14);
     const bb = calculateBollingerBands(allPrices, 20, 2);
     const zScore = calculateZScore(cp, allPrices.slice(-Math.min(50, allPrices.length)));
@@ -163,7 +167,7 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
         const val = holdings * cp;
         cash += val - val * cost;
         trades.push({ type: 'sell(SL)', price: cp, dayIndex: i, quantity: holdings, value: val });
-        holdings = 0; avgBuyPrice = 0; position = 'none';
+        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0;
         lastTradeDay = i;
         continue;
       }
@@ -171,35 +175,37 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
 
     if (isWarmup) continue;
 
-    // Trend Following
+    // Trend Following + Pyramiding + SMA100 filter
     if (isTrending && daysSinceLastTrade >= cooldownDays) {
-      if (position === 'none' && smaFast > smaSlow && cp > smaSlow && cash > 0) {
-        const invest = cash * buyRatio;
+      const trendBuy = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
+      if (trendBuy && cash > 0 && pyramidCount < maxPyramid) {
+        const invest = cash * pyramidRatio;
         const qty = invest / cp;
-        avgBuyPrice = cp;
+        avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
         cash -= invest + invest * cost;
         holdings += qty;
-        position = 'long';
+        position = 'long'; pyramidCount++;
         trades.push({ type: 'buy(TF)', price: cp, dayIndex: i, quantity: qty, value: invest });
         lastTradeDay = i;
       } else if (position === 'long' && smaFast < smaSlow) {
         const val = holdings * cp;
         cash += val - val * cost;
         trades.push({ type: 'sell(TF)', price: cp, dayIndex: i, quantity: holdings, value: val });
-        holdings = 0; avgBuyPrice = 0; position = 'none';
+        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0;
         lastTradeDay = i;
       }
     }
 
-    // Mean Reversion
+    // Mean Reversion + Triple Confirmation
     if (isRanging && daysSinceLastTrade >= cooldownDays) {
-      if (position === 'none' && rsi < 30 && (zScore < -1.5 || cp <= bb.lower) && cash > 0) {
-        const invest = cash * buyRatio;
+      const tripleConfirm = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
+      if (position === 'none' && tripleConfirm && cash > 0) {
+        const invest = cash * pyramidRatio;
         const qty = invest / cp;
         avgBuyPrice = cp;
         cash -= invest + invest * cost;
         holdings += qty;
-        position = 'long';
+        position = 'long'; pyramidCount = 1;
         trades.push({ type: 'buy(MR)', price: cp, dayIndex: i, quantity: qty, value: invest });
         lastTradeDay = i;
       } else if (position === 'long') {

@@ -653,8 +653,10 @@ export function calculateATR(prices: number[], period = 14): number {
   return trSum / period;
 }
 
-// ============ باك تيست - استراتيجية Claude + DeepSeek المشتركة ============
-// SMA ديناميكي + فترة تمهيد + RSI<30 مع تأكيد + ATR لوقف الخسارة
+// ============ باك تيست - استراتيجية Claude + DeepSeek النهائية ============
+// 1. Pyramiding في الصاعد (20% + 20% + 20% = حد أقصى 60%)
+// 2. فلتر SMA100 + ADX للاتجاه (يمنع الشراء عند القمم)
+// 3. تأكيد ثلاثي للارتداد (Z < -1.5 و RSI < 30 و Bollinger السفلي)
 
 export function runBacktest(
   prices: number[], initialCapital: number, settings: SystemSettings,
@@ -665,20 +667,21 @@ export function runBacktest(
     return { totalReturn: 0, buyAndHoldReturn: 0, numberOfTrades: 0, winRate: 0, trades: [], equityCurve: [initialCapital] };
   }
 
-  // SMA ديناميكي حسب طول البيانات (اقتراح DeepSeek)
   const dataLength = prices.length;
   const slowPeriod = Math.min(200, Math.max(50, Math.floor(dataLength * 0.3)));
   const fastPeriod = Math.max(10, Math.floor(slowPeriod * 0.4));
+  const sma100Period = Math.min(100, Math.max(30, Math.floor(dataLength * 0.5)));
 
   let cash = initialCapital, holdings = 0;
   let avgBuyPrice = 0;
   let position: 'none' | 'long' = 'none';
+  let pyramidCount = 0; // عدد دفعات الشراء المتتالية (Pyramiding)
+  const maxPyramid = 3; // حد أقصى 3 دفعات
+  const pyramidRatio = 0.20; // 20% من النقد لكل دفعة
   const trades: BacktestTrade[] = [];
   const equityCurve: number[] = [initialCapital];
   let lastTradeDay = -20;
   const cooldownDays = 10;
-
-  // فترة تمهيد: لا تداول خلالها (اقتراح DeepSeek)
   const warmupDays = slowPeriod;
 
   for (let i = fastPeriod; i < prices.length; i++) {
@@ -687,77 +690,78 @@ export function runBacktest(
     const daysSinceLastTrade = i - lastTradeDay;
     const isWarmup = i < warmupDays;
 
-    // المؤشرات
     const smaFast = calculateSMA(allPrices, fastPeriod);
     const smaSlow = calculateSMA(allPrices, Math.min(slowPeriod, allPrices.length));
+    const sma100 = calculateSMA(allPrices, Math.min(sma100Period, allPrices.length));
     const rsi = calculateRSI(allPrices, 14);
     const bb = calculateBollingerBands(allPrices, 20, 2);
     const zScore = calculateZScore(cp, allPrices.slice(-Math.min(50, allPrices.length)));
     const adx = calculateADX(allPrices, 14);
     const atr = calculateATR(allPrices, 14);
 
-    // وقف خسارة ديناميكي (ATR) - بين 3% و 8% (اقتراح DeepSeek)
     const dynamicStopLoss = cp > 0 ? Math.min(0.08, Math.max(0.03, 2 * atr / cp)) : 0.05;
-
-    // تحديد نوع السوق
     const isTrending = adx >= 25;
     const isRanging = adx < 20;
-
     const displayOS = isTrending ? (cp > smaSlow ? 0.8 : 0.2) : 0.5;
 
-    // ===== وقف خسارة ديناميكي (في كل الأحوال) =====
+    // ===== وقف خسارة ديناميكي =====
     if (position === 'long' && avgBuyPrice > 0) {
       const loss = (avgBuyPrice - cp) / avgBuyPrice;
       if (loss >= dynamicStopLoss) {
         const val = holdings * cp;
         cash += val - val * cost;
         trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
-        holdings = 0; avgBuyPrice = 0; position = 'none';
+        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0;
         lastTradeDay = i;
         equityCurve.push(cash);
         continue;
       }
     }
 
-    // لا تداول خلال فترة التمهيد
     if (isWarmup) {
       equityCurve.push(cash + holdings * cp);
       continue;
     }
 
-    // ===== الاستراتيجية A: اتباع الاتجاه (ADX ≥ 25) =====
+    // ===== الاستراتيجية A: اتباع الاتجاه مع Pyramiding =====
     if (isTrending && daysSinceLastTrade >= cooldownDays) {
-      // تقاطع SMA: السريع فوق البطيء = شراء
-      if (position === 'none' && smaFast > smaSlow && cp > smaSlow && cash > 0) {
-        const invest = cash * settings.backtestBuyRatio;
+      // شراء: تقاطع SMA + السعر فوق SMA100 (فلتر DeepSeek)
+      const trendBuyCondition = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
+
+      if (trendBuyCondition && cash > 0 && pyramidCount < maxPyramid) {
+        // Pyramiding: 20% من النقد لكل دفعة (بدل 30% مرة واحدة)
+        const invest = cash * pyramidRatio;
         const qty = invest / cp;
-        avgBuyPrice = cp;
+        avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
         cash -= invest + invest * cost;
         holdings += qty;
         position = 'long';
+        pyramidCount++;
         trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
         lastTradeDay = i;
       }
-      // تقاطع عكسي: السريع تحت البطيء = بيع
+      // بيع: تقاطع عكسي
       else if (position === 'long' && smaFast < smaSlow) {
         const val = holdings * cp;
         cash += val - val * cost;
         trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
-        holdings = 0; avgBuyPrice = 0; position = 'none';
+        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0;
         lastTradeDay = i;
       }
     }
 
-    // ===== الاستراتيجية B: الارتداد (ADX < 20) =====
+    // ===== الاستراتيجية B: الارتداد مع تأكيد ثلاثي =====
     if (isRanging && daysSinceLastTrade >= cooldownDays) {
-      // شراء: RSI < 30 + (Z < -1.5 أو Bollinger السفلي) (اقتراح DeepSeek المعدل)
-      if (position === 'none' && rsi < 30 && (zScore < -1.5 || cp <= bb.lower) && cash > 0) {
-        const invest = cash * settings.backtestBuyRatio;
+      // شراء: تأكيد ثلاثي (DeepSeek) - الثلاثة معاً
+      const tripleConfirm = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
+
+      if (position === 'none' && tripleConfirm && cash > 0) {
+        const invest = cash * pyramidRatio;
         const qty = invest / cp;
         avgBuyPrice = cp;
         cash -= invest + invest * cost;
         holdings += qty;
-        position = 'long';
+        position = 'long'; pyramidCount = 1;
         trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
         lastTradeDay = i;
       }
@@ -768,7 +772,7 @@ export function runBacktest(
           const val = holdings * cp;
           cash += val - val * cost;
           trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
-          holdings = 0; avgBuyPrice = 0; position = 'none';
+          holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0;
           lastTradeDay = i;
         }
       }
