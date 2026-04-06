@@ -712,10 +712,8 @@ export function runBacktest(
       else break;
     }
 
-    // تصنيف السوق محسّن (DeepSeek):
-    // اتجاه مؤكد = ADX ≥ 25 و تقاطع SMA مستمر ≥ 20 يوم
+    // تصنيف السوق (20 يوم تأكيد - ثبت أنه أفضل من 12)
     const isConfirmedTrend = adx >= 25 && consecutiveTrendDays >= 20;
-    // متذبذب = ADX < 25 أو الاتجاه لم يؤكد نفسه (< 15 يوم)
     const isRanging = adx < 25 || consecutiveTrendDays < 15;
 
     const displayOS = isConfirmedTrend ? (cp > smaSlow ? 0.8 : 0.2) : 0.5;
@@ -761,12 +759,11 @@ export function runBacktest(
     if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuyCondition = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
 
-      // Pyramiding تدريجي (DeepSeek): 15% × 3 + 15% + 10% = حد أقصى 70%
-      const maxPyramidExtended = 5;
-      const pyramidPct = pyramidCount < 3 ? 0.15 : (pyramidCount === 3 ? 0.15 : 0.10);
+      // Pyramiding (Gemini): 40% أولى + 20% + 15% = حد أقصى 75%
+      const maxPyramidExtended = 3;
+      const pyramidPct = pyramidCount === 0 ? 0.40 : (pyramidCount === 1 ? 0.20 : 0.15);
       const canBuy = pyramidCount < maxPyramidExtended;
-      // الدفعات 4+5 تحتاج تأكيد أقوى (40+ يوم)
-      const extraConfirm = pyramidCount >= 3 ? consecutiveTrendDays >= 40 : true;
+      const extraConfirm = pyramidCount >= 2 ? consecutiveTrendDays >= 25 : true;
 
       if (trendBuyCondition && cash > 0 && canBuy && extraConfirm) {
         const invest = cash * pyramidPct;

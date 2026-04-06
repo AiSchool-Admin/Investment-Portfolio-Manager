@@ -203,9 +203,9 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
     // Trend Following + Pyramiding تدريجي
     if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuy = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
-      const maxPE = 5;
-      const pPct = pyramidCount < 3 ? 0.15 : (pyramidCount === 3 ? 0.15 : 0.10);
-      const extraOK = pyramidCount >= 3 ? consecutiveTrendDays >= 40 : true;
+      const maxPE = 3;
+      const pPct = pyramidCount === 0 ? 0.40 : (pyramidCount === 1 ? 0.20 : 0.15);
+      const extraOK = pyramidCount >= 2 ? consecutiveTrendDays >= 25 : true;
 
       if (trendBuy && cash > 0 && pyramidCount < maxPE && extraOK) {
         peakPrice = Math.max(peakPrice, cp);
