@@ -635,149 +635,119 @@ export function optimizeWeights(
   return bestWeights;
 }
 
-// ============ تحويل بيانات يومية إلى أسبوعية ============
+// ============ SMA - المتوسط المتحرك البسيط ============
 
-export function toWeeklyPrices(dailyPrices: number[]): number[] {
-  const weekly: number[] = [];
-  for (let i = 0; i < dailyPrices.length; i += 5) {
-    // آخر سعر في كل أسبوع (5 أيام تداول)
-    const endOfWeek = Math.min(i + 4, dailyPrices.length - 1);
-    weekly.push(dailyPrices[endOfWeek]);
-  }
-  return weekly;
+export function calculateSMA(prices: number[], period: number): number {
+  if (prices.length < period) return prices.length > 0 ? mean(prices) : 0;
+  return mean(prices.slice(-period));
 }
 
-// ============ باك تيست - استراتيجية طويلة الأجل ============
-// المبادئ: شراء عند خوف شديد، جني أرباح تدريجي، وقف خسارة 15%
+// ============ باك تيست - استراتيجية مزدوجة ============
+// A: Trend Following (ADX ≥ 25) → SMA200/50 crossover
+// B: Mean Reversion (ADX < 20) → Bollinger + RSI
 
 export function runBacktest(
   prices: number[], initialCapital: number, settings: SystemSettings,
 ): BacktestResult {
-  const { riskFreeRate: rf, transactionCost: cost, tradingDaysPerYear } = settings;
-  const lookback = Math.min(settings.backtestLookback, Math.floor(prices.length * 0.4));
+  const { transactionCost: cost } = settings;
 
-  if (prices.length < 20) {
+  if (prices.length < 30) {
     return { totalReturn: 0, buyAndHoldReturn: 0, numberOfTrades: 0, winRate: 0, trades: [], equityCurve: [initialCapital] };
   }
 
-  // تحويل إلى أسبوعي لإزالة الضوضاء
-  const weeklyPrices = toWeeklyPrices(prices);
-  const weeklyLookback = Math.max(10, Math.floor(lookback / 5));
-
   let cash = initialCapital, holdings = 0;
   let avgBuyPrice = 0;
-  let highestPriceSinceBuy = 0;
-  let profitTaken20 = false; // هل تم جني أرباح 20%؟
-  let profitTaken30 = false; // هل تم جني أرباح 30%؟
+  let position: 'none' | 'long' = 'none';
   const trades: BacktestTrade[] = [];
   const equityCurve: number[] = [initialCapital];
-  let lastTradeWeek = -999;
-  const cooldownWeeks = 2;
+  let lastTradeDay = -20;
+  const cooldownDays = 10;
 
-  for (let w = weeklyLookback; w < weeklyPrices.length; w++) {
-    const window = weeklyPrices.slice(Math.max(0, w - weeklyLookback), w);
-    const cp = weeklyPrices[w];
-    const dayIndex = w * 5; // تقريب لرقم اليوم
+  // نحتاج 30 يوم على الأقل لحساب المؤشرات
+  const startDay = 30;
 
-    // تحديث أعلى سعر منذ الشراء
-    if (holdings > 0 && cp > highestPriceSinceBuy) {
-      highestPriceSinceBuy = cp;
+  for (let i = startDay; i < prices.length; i++) {
+    const cp = prices[i];
+    const allPrices = prices.slice(0, i + 1);
+    const daysSinceLastTrade = i - lastTradeDay;
+
+    // حساب المؤشرات الأساسية
+    const sma50 = calculateSMA(allPrices, Math.min(50, allPrices.length));
+    const sma200 = calculateSMA(allPrices, Math.min(allPrices.length, 200));
+    const adx = calculateADX(allPrices, 14);
+    const rsi = calculateRSI(allPrices, 14);
+    const bb = calculateBollingerBands(allPrices, 20, 2);
+
+    // تحديد نوع السوق
+    const isTrending = adx >= 25;
+    const isRanging = adx < 20;
+    // بين 20-25: منطقة انتظار
+
+    // OS للعرض فقط (ليس لاتخاذ القرار)
+    const displayOS = isTrending ? (cp > sma200 ? 0.8 : 0.2) : 0.5;
+
+    // ===== الاستراتيجية A: اتباع الاتجاه (ADX ≥ 25) =====
+    if (isTrending && daysSinceLastTrade >= cooldownDays) {
+
+      if (position === 'none' && cp > sma200 && cash > 0) {
+        // شراء: السعر فوق SMA200 + اتجاه قوي
+        const invest = cash * settings.backtestBuyRatio;
+        const qty = invest / cp;
+        avgBuyPrice = cp;
+        cash -= invest + invest * cost;
+        holdings += qty;
+        position = 'long';
+        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
+        lastTradeDay = i;
+      }
+      else if (position === 'long' && cp < sma50) {
+        // بيع: السعر تحت SMA50 (انعكاس)
+        const val = holdings * cp;
+        cash += val - val * cost;
+        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+        holdings = 0; avgBuyPrice = 0; position = 'none';
+        lastTradeDay = i;
+      }
     }
 
-    // حساب المؤشرات على البيانات الأسبوعية
-    const ret = calculateReturns(window);
-    const zScore = calculateZScore(cp, window);
-    const rsi = calculateRSI(weeklyPrices.slice(0, w + 1), settings.rsiPeriod);
-    const shr = ret.length > 1 ? sharpeRatio(mean(ret) * 52, rf, standardDeviation(ret) * Math.sqrt(52)) : 0;
+    // ===== الاستراتيجية B: الارتداد (ADX < 20) =====
+    if (isRanging && daysSinceLastTrade >= cooldownDays) {
 
-    // Score بسيط: Sharpe + RSI
-    const rsiSignal = rsi < 20 ? 1 : (rsi > 80 ? -1 : 0);
-    const scoreRaw = 0.6 * Math.max(-2, Math.min(2, shr)) + 0.4 * rsiSignal;
-    const score = 1 / (1 + Math.exp(-2.5 * scoreRaw)); // Sigmoid
+      if (position === 'none' && cp <= bb.lower && rsi < 25 && cash > 0) {
+        // شراء: السعر تحت Bollinger السفلي + RSI < 25
+        const invest = cash * settings.backtestBuyRatio;
+        const qty = invest / cp;
+        avgBuyPrice = cp;
+        cash -= invest + invest * cost;
+        holdings += qty;
+        position = 'long';
+        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
+        lastTradeDay = i;
+      }
+      else if (position === 'long') {
+        const gain = avgBuyPrice > 0 ? (cp - avgBuyPrice) / avgBuyPrice : 0;
 
-    const weeksSinceLastTrade = w - lastTradeWeek;
+        // بيع: وصل Bollinger العلوي أو ربح 10%
+        if (cp >= bb.upper || gain >= 0.10) {
+          const val = holdings * cp;
+          cash += val - val * cost;
+          trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+          holdings = 0; avgBuyPrice = 0; position = 'none';
+          lastTradeDay = i;
+        }
+      }
+    }
 
-    // === 1. وقف خسارة ثابت 15% ===
-    if (holdings > 0 && avgBuyPrice > 0) {
+    // ===== وقف خسارة 10% (في كل الأحوال) =====
+    if (position === 'long' && avgBuyPrice > 0) {
       const loss = (avgBuyPrice - cp) / avgBuyPrice;
-      if (loss >= 0.15) {
+      if (loss >= 0.10) {
         const val = holdings * cp;
         cash += val - val * cost;
-        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex, os: score });
-        holdings = 0; avgBuyPrice = 0; highestPriceSinceBuy = 0;
-        profitTaken20 = false; profitTaken30 = false;
-        lastTradeWeek = w;
-        equityCurve.push(cash);
-        continue;
+        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+        holdings = 0; avgBuyPrice = 0; position = 'none';
+        lastTradeDay = i;
       }
-    }
-
-    // === 2. Trailing Stop بعد ربح 30% (15% من القمة) ===
-    if (holdings > 0 && avgBuyPrice > 0 && profitTaken30) {
-      const dropFromHigh = highestPriceSinceBuy > 0 ? (highestPriceSinceBuy - cp) / highestPriceSinceBuy : 0;
-      if (dropFromHigh >= 0.15) {
-        const val = holdings * cp;
-        cash += val - val * cost;
-        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex, os: score });
-        holdings = 0; avgBuyPrice = 0; highestPriceSinceBuy = 0;
-        profitTaken20 = false; profitTaken30 = false;
-        lastTradeWeek = w;
-        equityCurve.push(cash);
-        continue;
-      }
-    }
-
-    // === 3. جني أرباح تدريجي ===
-    if (holdings > 0 && avgBuyPrice > 0) {
-      const gain = (cp - avgBuyPrice) / avgBuyPrice;
-
-      // بيع 25% عند ربح 20%
-      if (gain >= 0.20 && !profitTaken20 && weeksSinceLastTrade >= cooldownWeeks) {
-        const qty = holdings * 0.25;
-        const val = qty * cp;
-        cash += val - val * cost;
-        holdings -= qty;
-        trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex, os: score });
-        profitTaken20 = true;
-        lastTradeWeek = w;
-      }
-      // بيع 25% إضافي عند ربح 30%
-      else if (gain >= 0.30 && !profitTaken30 && profitTaken20 && weeksSinceLastTrade >= cooldownWeeks) {
-        const qty = holdings * 0.33; // 25% من الأصلي ≈ 33% من المتبقي
-        const val = qty * cp;
-        cash += val - val * cost;
-        holdings -= qty;
-        trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex, os: score });
-        profitTaken30 = true;
-        lastTradeWeek = w;
-      }
-    }
-
-    // === 4. شراء عند خوف شديد ===
-    const extremeFear = rsi < 20 || zScore < -2.5;
-    // أو اتجاه صاعد قوي ومستقر
-    const strongTrend = shr > 1.0 && rsi > 40 && rsi < 70;
-
-    if (score >= 0.6 && (extremeFear || strongTrend) && cash > 0 && weeksSinceLastTrade >= cooldownWeeks) {
-      const invest = cash * settings.backtestBuyRatio;
-      const qty = invest / cp;
-      avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
-      highestPriceSinceBuy = Math.max(highestPriceSinceBuy, cp);
-      cash -= invest + invest * cost;
-      holdings += qty;
-      profitTaken20 = false; profitTaken30 = false;
-      trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex, os: score });
-      lastTradeWeek = w;
-    }
-
-    // === 5. بيع عند طمع شديد (بدون ربح مسبق) ===
-    else if (score <= 0.3 && holdings > 0 && (rsi > 80 || zScore > 2.5) && weeksSinceLastTrade >= cooldownWeeks) {
-      const qty = holdings * settings.backtestSellRatio;
-      const val = qty * cp;
-      cash += val - val * cost;
-      holdings -= qty;
-      trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex, os: score });
-      lastTradeWeek = w;
     }
 
     equityCurve.push(cash + holdings * cp);
