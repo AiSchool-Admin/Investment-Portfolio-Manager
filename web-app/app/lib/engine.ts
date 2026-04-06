@@ -701,6 +701,7 @@ export function runBacktest(
 
     // وقف خسارة ديناميكي أضيق للدخول المبكر
     const earlyStopLoss = cp > 0 ? Math.min(0.05, Math.max(0.025, 1.5 * atr / cp)) : 0.035;
+    const isRanging = adx < 25;
 
     const displayOS = cp > smaSlow ? 0.7 : 0.3;
 
