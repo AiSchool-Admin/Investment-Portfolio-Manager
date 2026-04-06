@@ -6,6 +6,7 @@ import AssetsPage from './AssetsPage';
 import SignalsPage from './SignalsPage';
 import BacktestPage from './BacktestPage';
 import PositionBuilderPage from './PositionBuilderPage';
+import EconomicIndicatorsPage from './EconomicIndicatorsPage';
 import SettingsPage from './SettingsPage';
 
 const TABS = [
@@ -13,6 +14,7 @@ const TABS = [
   { id: 'assets', label: 'الأصول', icon: '💼' },
   { id: 'builder', label: 'بناء المراكز', icon: '🏗️' },
   { id: 'signals', label: 'الإشارات', icon: '🔔' },
+  { id: 'macro', label: 'الاقتصاد الكلي', icon: '🌍' },
   { id: 'backtest', label: 'باك تيست', icon: '📈' },
   { id: 'settings', label: 'الإعدادات', icon: '⚙️' },
 ];
@@ -53,6 +55,7 @@ export default function AppShell() {
         {tab === 'assets' && <AssetsPage key={refreshKey} onRefresh={refresh} />}
         {tab === 'builder' && <PositionBuilderPage key={refreshKey} onRefresh={refresh} />}
         {tab === 'signals' && <SignalsPage key={refreshKey} />}
+        {tab === 'macro' && <EconomicIndicatorsPage />}
         {tab === 'backtest' && <BacktestPage />}
         {tab === 'settings' && <SettingsPage />}
       </main>
