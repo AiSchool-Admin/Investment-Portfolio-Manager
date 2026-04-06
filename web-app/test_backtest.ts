@@ -201,50 +201,73 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
 
     if (isWarmup) continue;
 
-    // Trend Following (DeepSeek 4 تعديلات)
-    if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
-      const trendBuy = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
-
-      // تخصيص ديناميكي
-      let dynAlloc = 0.40;
-      if (adx >= 30) dynAlloc = 0.50;
-      if (adx >= 35 && consecutiveTrendDays >= 30) dynAlloc = 0.60;
-      dynAlloc = Math.min(0.70, dynAlloc);
-
-      // شراء التصحيحات
-      const isDip = position === 'long' && peakPrice > 0 && ((peakPrice - cp) / peakPrice) >= 0.05;
-
-      if (trendBuy && cash > 0 && pyramidCount === 0) {
-        peakPrice = cp;
-        const invest = cash * dynAlloc;
+    // === فلسفة الربح أولاً ===
+    // دخول مبكر
+    if (position === 'none' && cash > 0 && daysSinceLastTrade >= cooldownDays) {
+      if (isConfirmedTrend && smaFast > smaSlow && cp > sma100) {
+        const invest = cash * 0.70;
         const qty = invest / cp;
-        avgBuyPrice = cp;
+        avgBuyPrice = cp; peakPrice = cp;
         cash -= invest + invest * cost;
-        holdings += qty;
-        position = 'long'; pyramidCount = 1;
-        trades.push({ type: 'buy(TF)', price: cp, dayIndex: i, quantity: qty, value: invest });
+        holdings += qty; position = 'long'; pyramidCount = 1;
+        trades.push({ type: 'buy(STRONG)', price: cp, dayIndex: i, quantity: qty, value: invest });
         lastTradeDay = i;
-      } else if (isDip && adx >= 25 && cash > 0 && pyramidCount >= 1 && pyramidCount < 3) {
-        const invest = cash * 0.10;
+      } else if (cp > smaSlow && cp > smaFast && adx >= 20 && consecutiveTrendDays >= 10) {
+        const invest = cash * 0.40;
+        const qty = invest / cp;
+        avgBuyPrice = cp; peakPrice = cp;
+        cash -= invest + invest * cost;
+        holdings += qty; position = 'long'; pyramidCount = 1;
+        trades.push({ type: 'buy(EARLY)', price: cp, dayIndex: i, quantity: qty, value: invest });
+        lastTradeDay = i;
+      }
+    }
+    // تعزيز
+    else if (position === 'long' && isConfirmedTrend && cash > 0 && pyramidCount < 3 && daysSinceLastTrade >= cooldownDays) {
+      const gain = avgBuyPrice > 0 ? (cp - avgBuyPrice) / avgBuyPrice : 0;
+      if (gain > 0.02) {
+        let boostPct = 0.20;
+        if (adx >= 35 && consecutiveTrendDays >= 30) boostPct = 0.40;
+        const invest = cash * boostPct;
+        const qty = invest / cp;
+        avgBuyPrice = ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty);
+        peakPrice = Math.max(peakPrice, cp);
+        cash -= invest + invest * cost;
+        holdings += qty; pyramidCount++;
+        trades.push({ type: 'buy(BOOST)', price: cp, dayIndex: i, quantity: qty, value: invest });
+        lastTradeDay = i;
+      }
+    }
+    // شراء التصحيحات
+    if (position === 'long' && isConfirmedTrend && cash > 0 && pyramidCount < 5 && daysSinceLastTrade >= cooldownDays) {
+      const dip = peakPrice > 0 ? (peakPrice - cp) / peakPrice : 0;
+      if (dip >= 0.05 && adx >= 25) {
+        const invest = cash * 0.15;
         const qty = invest / cp;
         avgBuyPrice = ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty);
         cash -= invest + invest * cost;
         holdings += qty; pyramidCount++;
         trades.push({ type: 'buy(DIP)', price: cp, dayIndex: i, quantity: qty, value: invest });
         lastTradeDay = i;
-      } else if (position === 'long' && avgBuyPrice > 0 && ((cp - avgBuyPrice) / avgBuyPrice) >= 0.25 && holdings > 0) {
-        const qty = holdings * 0.30;
+      }
+    }
+    // جني أرباح 25%
+    if (position === 'long' && avgBuyPrice > 0 && holdings > 0 && daysSinceLastTrade >= cooldownDays) {
+      if ((cp - avgBuyPrice) / avgBuyPrice >= 0.25) {
+        const qty = holdings * 0.25;
         const val = qty * cp;
         cash += val - val * cost; holdings -= qty;
         trades.push({ type: 'sell(TP)', price: cp, dayIndex: i, quantity: qty, value: val });
         lastTradeDay = i;
-      } else if (position === 'long' && smaFast < smaSlow) {
-        const val = holdings * cp;
-        cash += val - val * cost;
-        trades.push({ type: 'sell(TF)', price: cp, dayIndex: i, quantity: holdings, value: val });
-        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0;
-        lastTradeDay = i;
       }
+    }
+    // خروج عند انعكاس
+    if (position === 'long' && smaFast < smaSlow && daysSinceLastTrade >= 5) {
+      const val = holdings * cp;
+      cash += val - val * cost;
+      trades.push({ type: 'sell(REV)', price: cp, dayIndex: i, quantity: holdings, value: val });
+      holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0;
+      lastTradeDay = i;
     }
 
     // Mean Reversion القناص (Gemini Active Ranging)
