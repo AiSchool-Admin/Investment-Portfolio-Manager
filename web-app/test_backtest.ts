@@ -157,8 +157,18 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
 
     const dynamicStopLoss = cp > 0 ? Math.min(0.08, Math.max(0.03, 2 * atr / cp)) : 0.05;
 
-    const isTrending = adx >= 25;
-    const isRanging = adx < 20;
+    // فلتر المدة (Claude + DeepSeek)
+    let consecutiveTrendDays = 0;
+    for (let j = i; j >= Math.max(fastPeriod, i - 40); j--) {
+      const pSlice = prices.slice(0, j + 1);
+      const sf = calculateSMA(pSlice, fastPeriod);
+      const ss = calculateSMA(pSlice, Math.min(slowPeriod, pSlice.length));
+      if (sf > ss) consecutiveTrendDays++;
+      else break;
+    }
+
+    const isConfirmedTrend = adx >= 25 && consecutiveTrendDays >= 20;
+    const isRanging = adx < 25 || consecutiveTrendDays < 15;
 
     // وقف خسارة
     if (position === 'long' && avgBuyPrice > 0) {
@@ -175,11 +185,11 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
 
     if (isWarmup) continue;
 
-    // Trend Following + Pyramiding + SMA100 filter
-    if (isTrending && daysSinceLastTrade >= cooldownDays) {
+    // Trend Following (اتجاه مؤكد فقط)
+    if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuy = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
       if (trendBuy && cash > 0 && pyramidCount < maxPyramid) {
-        const invest = cash * pyramidRatio;
+        const invest = cash * 0.15;
         const qty = invest / cp;
         avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
         cash -= invest + invest * cost;

@@ -700,9 +700,24 @@ export function runBacktest(
     const atr = calculateATR(allPrices, 14);
 
     const dynamicStopLoss = cp > 0 ? Math.min(0.08, Math.max(0.03, 2 * atr / cp)) : 0.05;
-    const isTrending = adx >= 25;
-    const isRanging = adx < 20;
-    const displayOS = isTrending ? (cp > smaSlow ? 0.8 : 0.2) : 0.5;
+
+    // === فلتر المدة: كم يوم متواصلة SMA_fast > SMA_slow? (Claude + DeepSeek) ===
+    let consecutiveTrendDays = 0;
+    for (let j = i; j >= Math.max(fastPeriod, i - 40); j--) {
+      const pSlice = prices.slice(0, j + 1);
+      const sf = calculateSMA(pSlice, fastPeriod);
+      const ss = calculateSMA(pSlice, Math.min(slowPeriod, pSlice.length));
+      if (sf > ss) consecutiveTrendDays++;
+      else break;
+    }
+
+    // تصنيف السوق محسّن (DeepSeek):
+    // اتجاه مؤكد = ADX ≥ 25 و تقاطع SMA مستمر ≥ 20 يوم
+    const isConfirmedTrend = adx >= 25 && consecutiveTrendDays >= 20;
+    // متذبذب = ADX < 25 أو الاتجاه لم يؤكد نفسه (< 15 يوم)
+    const isRanging = adx < 25 || consecutiveTrendDays < 15;
+
+    const displayOS = isConfirmedTrend ? (cp > smaSlow ? 0.8 : 0.2) : 0.5;
 
     // ===== وقف خسارة ديناميكي =====
     if (position === 'long' && avgBuyPrice > 0) {
@@ -723,14 +738,13 @@ export function runBacktest(
       continue;
     }
 
-    // ===== الاستراتيجية A: اتباع الاتجاه مع Pyramiding =====
-    if (isTrending && daysSinceLastTrade >= cooldownDays) {
-      // شراء: تقاطع SMA + السعر فوق SMA100 (فلتر DeepSeek)
+    // ===== الاستراتيجية A: اتباع الاتجاه (اتجاه مؤكد فقط) =====
+    if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuyCondition = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
 
       if (trendBuyCondition && cash > 0 && pyramidCount < maxPyramid) {
-        // Pyramiding: 20% من النقد لكل دفعة (بدل 30% مرة واحدة)
-        const invest = cash * pyramidRatio;
+        // Pyramiding تدريجي: 15% لكل دفعة (DeepSeek)
+        const invest = cash * 0.15;
         const qty = invest / cp;
         avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
         cash -= invest + invest * cost;
