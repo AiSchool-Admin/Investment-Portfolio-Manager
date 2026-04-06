@@ -31,6 +31,38 @@ export interface MacroVariables {
 
 // ============ القيم الافتراضية للمتغيرات ============
 
+// ============ مصفوفة التحقق (Gemini - Sanity Constraints) ============
+
+export const ECONOMY_LIMITS: Record<keyof MacroVariables, { min: number; max: number; unit: string; label: string }> = {
+  usRealYield10y: { min: -2.0, max: 5.0, unit: '%', label: 'العائد الحقيقي 10 سنوات' },
+  dxyIndex: { min: 80, max: 125, unit: 'نقطة', label: 'مؤشر الدولار' },
+  vixIndex: { min: 8, max: 80, unit: '', label: 'مؤشر VIX' },
+  centralBankGoldBuy: { min: 0, max: 100, unit: 'طن', label: 'مشتريات البنوك المركزية' },
+  globalPMI: { min: 35, max: 65, unit: '', label: 'PMI العالمي' },
+  cpiEgypt: { min: 4, max: 50, unit: '%', label: 'التضخم المصري' },
+  cpiUS: { min: 0, max: 15, unit: '%', label: 'التضخم الأمريكي' },
+  cbeInterestRate: { min: 7, max: 40, unit: '%', label: 'فائدة CBE' },
+  usFedRate: { min: 0, max: 10, unit: '%', label: 'فائدة الفيدرالي' },
+  nfaGap: { min: -30, max: 30, unit: 'مليار $', label: 'فجوة NFA' },
+  externalDebtService: { min: 0, max: 30, unit: 'مليار $', label: 'خدمة الدين' },
+  fdi: { min: 0, max: 15, unit: 'مليار $', label: 'الاستثمار الأجنبي' },
+  remittances: { min: 10, max: 40, unit: 'مليار $', label: 'التحويلات' },
+  exports: { min: 20, max: 60, unit: 'مليار $', label: 'الصادرات' },
+  reserves: { min: 20, max: 60, unit: 'مليار $', label: 'الاحتياطي' },
+};
+
+// التحقق من صلاحية القيم
+export function validateMacro(macro: MacroVariables): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  for (const [key, limits] of Object.entries(ECONOMY_LIMITS)) {
+    const val = macro[key as keyof MacroVariables];
+    if (val < limits.min || val > limits.max) {
+      errors.push(`${limits.label}: ${val} خارج النطاق (${limits.min} - ${limits.max} ${limits.unit})`);
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
 export const DEFAULT_MACRO: MacroVariables = {
   usRealYield10y: 2.0,
   dxyIndex: 104,
@@ -217,20 +249,21 @@ export interface ValuationResult {
 export function calculateValuationGap(
   currentPrice: number,
   fairPrice: number,
-): { gap: number; gapPercent: number; recommendation: string } {
-  if (fairPrice <= 0) return { gap: 0, gapPercent: 0, recommendation: 'بيانات غير كافية' };
+): { gap: number; gapPercent: number; recommendation: string; signal: string } {
+  if (fairPrice <= 0) return { gap: 0, gapPercent: 0, recommendation: 'بيانات غير كافية', signal: 'hold' };
 
   const gap = (currentPrice - fairPrice) / fairPrice;
   const gapPercent = gap * 100;
 
   let recommendation: string;
-  if (gap < -0.10) recommendation = 'مقيّم بأقل من قيمته بشكل كبير ← فرصة شراء قوية';
-  else if (gap < -0.05) recommendation = 'مقيّم بأقل من قيمته ← فرصة شراء';
-  else if (gap < 0.05) recommendation = 'مقيّم بشكل عادل ← احتفاظ';
-  else if (gap < 0.10) recommendation = 'مقيّم بأكثر من قيمته ← حذر';
-  else recommendation = 'مقيّم بأكثر من قيمته بشكل كبير ← فرصة بيع';
+  let signal: 'strong_buy' | 'buy' | 'hold' | 'reduce' | 'strong_sell';
+  if (gap < -0.15) { recommendation = 'مقيّم بأقل من قيمته بشكل كبير ← شراء قوي'; signal = 'strong_buy'; }
+  else if (gap < -0.05) { recommendation = 'مقيّم بأقل من قيمته ← فرصة شراء'; signal = 'buy'; }
+  else if (gap <= 0.05) { recommendation = 'مقيّم بشكل عادل ← احتفاظ'; signal = 'hold'; }
+  else if (gap <= 0.15) { recommendation = 'مقيّم بأكثر من قيمته ← تخفيف الوزن'; signal = 'reduce'; }
+  else { recommendation = 'مقيّم بأكثر من قيمته بشكل كبير ← فرصة بيع'; signal = 'strong_sell'; }
 
-  return { gap, gapPercent, recommendation };
+  return { gap, gapPercent, recommendation, signal };
 }
 
 // ============ تعديل عتبات التداول بناءً على التقييم ============
