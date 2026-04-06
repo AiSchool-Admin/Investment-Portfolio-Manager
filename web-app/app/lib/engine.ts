@@ -758,42 +758,56 @@ export function runBacktest(
       continue;
     }
 
-    // ===== الاستراتيجية A: اتباع الاتجاه مع Pyramiding تدريجي =====
+    // ===== الاستراتيجية A: اتباع الاتجاه (DeepSeek 4 تعديلات) =====
     if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuyCondition = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
 
-      // Pyramiding هجومي (Gemini):
-      // الدفعة الأولى: 60% من النقد (دخول قوي)
-      // التعزيز: 40% المتبقية عند صعود 5% (Momentum Entry)
-      const maxPyramidExtended = 2;
-      const pyramidPct = pyramidCount === 0 ? 0.60 : 1.0; // الثانية = كل المتبقي
-      const canBuy = pyramidCount < maxPyramidExtended;
-      // التعزيز: فقط إذا السعر ارتفع 5% عن سعر الدخول
-      const momentumConfirm = pyramidCount === 0 ? true :
-        (avgBuyPrice > 0 && (cp - avgBuyPrice) / avgBuyPrice >= 0.05);
+      // === تعديل 1: تخصيص النقد الديناميكي (DeepSeek) ===
+      let dynamicAllocation = 0.40; // الأساس 40%
+      if (adx >= 30) dynamicAllocation = 0.50;
+      if (adx >= 35 && consecutiveTrendDays >= 30) dynamicAllocation = 0.60;
+      dynamicAllocation = Math.min(0.70, dynamicAllocation); // حد أقصى 70%
 
-      if (trendBuyCondition && cash > 0 && canBuy && momentumConfirm) {
-        const invest = cash * pyramidPct;
+      // === تعديل 2: شراء التصحيحات (Dip Buying) ===
+      let dipBuyCount = 0;
+      const isDip = position === 'long' && peakPrice > 0 && ((peakPrice - cp) / peakPrice) >= 0.05;
+      const canDipBuy = isDip && adx >= 25 && cash > 0 && dipBuyCount < 2;
+
+      if (trendBuyCondition && cash > 0 && pyramidCount === 0) {
+        // الدفعة الأولى: تخصيص ديناميكي
+        const invest = cash * dynamicAllocation;
         const qty = invest / cp;
-        avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
-        peakPrice = Math.max(peakPrice, cp);
+        avgBuyPrice = cp;
+        peakPrice = cp;
         cash -= invest + invest * cost;
         holdings += qty;
         position = 'long';
-        pyramidCount++;
+        pyramidCount = 1;
         trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
         lastTradeDay = i;
       }
-      // جني أرباح جزئي عند 30% ربح (DeepSeek)
-      else if (position === 'long' && avgBuyPrice > 0 && ((cp - avgBuyPrice) / avgBuyPrice) >= 0.30 && holdings > 0) {
-        const qty = holdings * 0.30; // بيع 30% من المركز
+      else if (canDipBuy) {
+        // شراء عند التصحيح: 10% من النقد المتبقي (بحد أقصى 2 مرات)
+        const invest = cash * 0.10;
+        const qty = invest / cp;
+        avgBuyPrice = ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty);
+        cash -= invest + invest * cost;
+        holdings += qty;
+        pyramidCount++;
+        dipBuyCount++;
+        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
+        lastTradeDay = i;
+      }
+      // === تعديل 4: جني أرباح جزئي عند 25% ربح (بيع 30%) ===
+      else if (position === 'long' && avgBuyPrice > 0 && ((cp - avgBuyPrice) / avgBuyPrice) >= 0.25 && holdings > 0) {
+        const qty = holdings * 0.30;
         const val = qty * cp;
         cash += val - val * cost;
         holdings -= qty;
         trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex: i, os: displayOS });
         lastTradeDay = i;
       }
-      // بيع كامل فقط عند انعكاس حقيقي (تقاطع SMA عكسي)
+      // بيع كامل فقط عند انعكاس حقيقي
       else if (position === 'long' && smaFast < smaSlow) {
         const val = holdings * cp;
         cash += val - val * cost;

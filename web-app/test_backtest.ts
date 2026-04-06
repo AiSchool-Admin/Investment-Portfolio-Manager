@@ -201,26 +201,38 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
 
     if (isWarmup) continue;
 
-    // Trend Following + Pyramiding تدريجي
+    // Trend Following (DeepSeek 4 تعديلات)
     if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuy = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
-      const maxPE = 2;
-      const pPct = pyramidCount === 0 ? 0.60 : 1.0;
-      const momOK = pyramidCount === 0 ? true :
-        (avgBuyPrice > 0 && (cp - avgBuyPrice) / avgBuyPrice >= 0.05);
 
-      if (trendBuy && cash > 0 && pyramidCount < maxPE && momOK) {
-        peakPrice = Math.max(peakPrice, cp);
-        const invest = cash * pPct;
+      // تخصيص ديناميكي
+      let dynAlloc = 0.40;
+      if (adx >= 30) dynAlloc = 0.50;
+      if (adx >= 35 && consecutiveTrendDays >= 30) dynAlloc = 0.60;
+      dynAlloc = Math.min(0.70, dynAlloc);
+
+      // شراء التصحيحات
+      const isDip = position === 'long' && peakPrice > 0 && ((peakPrice - cp) / peakPrice) >= 0.05;
+
+      if (trendBuy && cash > 0 && pyramidCount === 0) {
+        peakPrice = cp;
+        const invest = cash * dynAlloc;
         const qty = invest / cp;
-        avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
+        avgBuyPrice = cp;
         cash -= invest + invest * cost;
         holdings += qty;
-        position = 'long'; pyramidCount++;
+        position = 'long'; pyramidCount = 1;
         trades.push({ type: 'buy(TF)', price: cp, dayIndex: i, quantity: qty, value: invest });
         lastTradeDay = i;
-      } else if (position === 'long' && avgBuyPrice > 0 && ((cp - avgBuyPrice) / avgBuyPrice) >= 0.30 && holdings > 0) {
-        // جني أرباح 30%
+      } else if (isDip && adx >= 25 && cash > 0 && pyramidCount >= 1 && pyramidCount < 3) {
+        const invest = cash * 0.10;
+        const qty = invest / cp;
+        avgBuyPrice = ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty);
+        cash -= invest + invest * cost;
+        holdings += qty; pyramidCount++;
+        trades.push({ type: 'buy(DIP)', price: cp, dayIndex: i, quantity: qty, value: invest });
+        lastTradeDay = i;
+      } else if (position === 'long' && avgBuyPrice > 0 && ((cp - avgBuyPrice) / avgBuyPrice) >= 0.25 && holdings > 0) {
         const qty = holdings * 0.30;
         const val = qty * cp;
         cash += val - val * cost; holdings -= qty;
