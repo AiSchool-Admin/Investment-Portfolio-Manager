@@ -280,37 +280,93 @@ function generateRanging(): number[] {
   return prices;
 }
 
+// ============ بيانات سنة كاملة (252 يوم) ============
+
+function generateRealisticTrendingUp(): number[] {
+  // 10 → ~14.5 (+45%) مع تصحيحات 5-8% كل 50 يوم
+  const prices: number[] = [10.00];
+  for (let i = 1; i < 252; i++) {
+    const prev = prices[i - 1];
+    const trend = 0.0018; // اتجاه صاعد ثابت
+    const noise = Math.sin(i * 0.5) * 0.003;
+    // تصحيح 7% كل 50 يوم (يستمر 8 أيام)
+    const inCorrection = (i % 50) > 42;
+    const correction = inCorrection ? -0.009 : 0;
+    prices.push(Math.round((prev * (1 + trend + noise + correction)) * 100) / 100);
+  }
+  return prices;
+}
+
+function generateRealisticTrendingDown(): number[] {
+  // 15 → ~10 (-33%) مع ارتدادات مؤقتة
+  const prices: number[] = [15.00];
+  for (let i = 1; i < 252; i++) {
+    const prev = prices[i - 1];
+    const trend = -0.0016; // هبوط ثابت
+    const noise = Math.sin(i * 0.4) * 0.003;
+    // ارتداد 5% كل 40 يوم (يستمر 6 أيام)
+    const inBounce = (i % 40) > 34;
+    const bounce = inBounce ? 0.008 : 0;
+    prices.push(Math.round((prev * (1 + trend + noise + bounce)) * 100) / 100);
+  }
+  return prices;
+}
+
+function generateRealisticRanging(): number[] {
+  // يتذبذب بين 9 و 12.5 مع دورات 70 يوم
+  const prices: number[] = [];
+  for (let i = 0; i < 252; i++) {
+    const cycle = Math.sin(i * 2 * Math.PI / 70) * 1.8;
+    const subCycle = Math.sin(i * 2 * Math.PI / 25) * 0.3;
+    const noise = Math.sin(i * 5.3) * 0.1;
+    prices.push(Math.round((10.8 + cycle + subCycle + noise) * 100) / 100);
+  }
+  return prices;
+}
+
 // ============ تشغيل الاختبارات ============
 
-console.log('='.repeat(60));
+console.log('='.repeat(70));
 console.log('اختبار الباك تيست - استراتيجية Claude + DeepSeek');
-console.log('='.repeat(60));
+console.log('='.repeat(70));
 
-const scenarios = [
-  { name: 'صاعد (trending_up)', prices: generateTrendingUp() },
-  { name: 'هابط (trending_down)', prices: generateTrendingDown() },
-  { name: 'متذبذب (ranging)', prices: generateRanging() },
+// اختبار على بيانات قصيرة (152 يوم)
+console.log('\n📅 بيانات قصيرة (152 يوم):');
+const shortScenarios = [
+  { name: 'صاعد 152 يوم', prices: generateTrendingUp() },
+  { name: 'هابط 152 يوم', prices: generateTrendingDown() },
+  { name: 'متذبذب 152 يوم', prices: generateRanging() },
 ];
 
-for (const s of scenarios) {
-  console.log(`\n${'─'.repeat(50)}`);
-  console.log(`📊 ${s.name}`);
-  console.log(`   بيانات: ${s.prices.length} يوم | بداية: $${s.prices[0]} | نهاية: $${s.prices[s.prices.length-1]}`);
-
+for (const s of shortScenarios) {
   const result = runBacktest(s.prices, 10000);
+  const diff = result.totalReturn - result.buyAndHoldReturn;
+  console.log(`  ${s.name}: استراتيجية ${result.totalReturn >= 0 ? '+' : ''}${result.totalReturn.toFixed(1)}% | احتفاظ ${result.buyAndHoldReturn >= 0 ? '+' : ''}${result.buyAndHoldReturn.toFixed(1)}% | فرق ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}% | ${result.numberOfTrades} صفقات`);
+}
 
-  console.log(`   عائد الاستراتيجية: ${result.totalReturn >= 0 ? '+' : ''}${result.totalReturn.toFixed(2)}%`);
-  console.log(`   الشراء والاحتفاظ: ${result.buyAndHoldReturn >= 0 ? '+' : ''}${result.buyAndHoldReturn.toFixed(2)}%`);
-  console.log(`   الفرق: ${(result.totalReturn - result.buyAndHoldReturn) >= 0 ? '+' : ''}${(result.totalReturn - result.buyAndHoldReturn).toFixed(2)}%`);
-  console.log(`   صفقات: ${result.numberOfTrades} | معدل الفوز: ${result.winRate.toFixed(0)}%`);
+// اختبار على بيانات طويلة (252 يوم = سنة)
+console.log('\n📅 بيانات سنة كاملة (252 يوم):');
+const longScenarios = [
+  { name: 'صاعد واقعي 252 يوم', prices: generateRealisticTrendingUp() },
+  { name: 'هابط واقعي 252 يوم', prices: generateRealisticTrendingDown() },
+  { name: 'متذبذب واقعي 252 يوم', prices: generateRealisticRanging() },
+];
 
-  if (result.trades.length > 0) {
-    console.log(`   سجل الصفقات:`);
+for (const s of longScenarios) {
+  const result = runBacktest(s.prices, 10000);
+  const diff = result.totalReturn - result.buyAndHoldReturn;
+  console.log(`  ${s.name}:`);
+  console.log(`    بداية: $${s.prices[0]} | نهاية: $${s.prices[s.prices.length-1]} | ${s.prices.length} يوم`);
+  console.log(`    استراتيجية: ${result.totalReturn >= 0 ? '+' : ''}${result.totalReturn.toFixed(2)}%`);
+  console.log(`    احتفاظ: ${result.buyAndHoldReturn >= 0 ? '+' : ''}${result.buyAndHoldReturn.toFixed(2)}%`);
+  console.log(`    الفرق: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%`);
+  console.log(`    صفقات: ${result.numberOfTrades} | فوز: ${result.winRate.toFixed(0)}%`);
+  if (result.trades.length > 0 && result.trades.length <= 10) {
     for (const t of result.trades) {
-      console.log(`     يوم ${t.dayIndex}: ${t.type} @ $${t.price.toFixed(2)} (${t.quantity.toFixed(2)} وحدة = $${t.value.toFixed(2)})`);
+      console.log(`      يوم ${t.dayIndex}: ${t.type} @ $${t.price.toFixed(2)} ($${t.value.toFixed(0)})`);
     }
   }
 }
 
-console.log(`\n${'='.repeat(60)}`);
+console.log(`\n${'='.repeat(70)}`);
 console.log('انتهى الاختبار');
