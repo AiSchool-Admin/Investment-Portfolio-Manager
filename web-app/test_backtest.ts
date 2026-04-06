@@ -135,6 +135,7 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
   let avgBuyPrice = 0;
   let position: 'none' | 'long' = 'none';
   let pyramidCount = 0;
+  let peakPrice = 0;
   const trades: BacktestResult['trades'] = [];
   let lastTradeDay = -20;
   const cooldownDays = 10;
@@ -170,16 +171,30 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
     const isConfirmedTrend = adx >= 25 && consecutiveTrendDays >= 20;
     const isRanging = adx < 25 || consecutiveTrendDays < 15;
 
-    // وقف خسارة
+    // تتبع القمة
+    if (position === 'long' && cp > peakPrice) peakPrice = cp;
+
+    // وقف خسارة ذكي
     if (position === 'long' && avgBuyPrice > 0) {
-      const loss = (avgBuyPrice - cp) / avgBuyPrice;
-      if (loss >= dynamicStopLoss) {
-        const val = holdings * cp;
-        cash += val - val * cost;
-        trades.push({ type: 'sell(SL)', price: cp, dayIndex: i, quantity: holdings, value: val });
-        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0;
-        lastTradeDay = i;
-        continue;
+      if (isConfirmedTrend) {
+        // اتجاه مؤكد: شبكة أمان 20% من القمة فقط
+        const dd = peakPrice > 0 ? (peakPrice - cp) / peakPrice : 0;
+        if (dd >= 0.20) {
+          const val = holdings * cp;
+          cash += val - val * cost;
+          trades.push({ type: 'sell(CRASH)', price: cp, dayIndex: i, quantity: holdings, value: val });
+          holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0;
+          lastTradeDay = i; continue;
+        }
+      } else {
+        const loss = (avgBuyPrice - cp) / avgBuyPrice;
+        if (loss >= dynamicStopLoss) {
+          const val = holdings * cp;
+          cash += val - val * cost;
+          trades.push({ type: 'sell(SL)', price: cp, dayIndex: i, quantity: holdings, value: val });
+          holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0;
+          lastTradeDay = i; continue;
+        }
       }
     }
 
@@ -189,6 +204,7 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
     if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuy = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
       if (trendBuy && cash > 0 && pyramidCount < maxPyramid) {
+        peakPrice = Math.max(peakPrice, cp);
         const invest = cash * 0.15;
         const qty = invest / cp;
         avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
@@ -201,7 +217,7 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
         const val = holdings * cp;
         cash += val - val * cost;
         trades.push({ type: 'sell(TF)', price: cp, dayIndex: i, quantity: holdings, value: val });
-        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0;
+        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0;
         lastTradeDay = i;
       }
     }

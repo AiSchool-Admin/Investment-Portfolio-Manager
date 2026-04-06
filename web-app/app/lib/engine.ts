@@ -675,8 +675,9 @@ export function runBacktest(
   let cash = initialCapital, holdings = 0;
   let avgBuyPrice = 0;
   let position: 'none' | 'long' = 'none';
-  let pyramidCount = 0; // عدد دفعات الشراء المتتالية (Pyramiding)
-  const maxPyramid = 3; // حد أقصى 3 دفعات
+  let pyramidCount = 0;
+  let peakPrice = 0; // أعلى سعر منذ الشراء (لشبكة الأمان)
+  const maxPyramid = 3;
   const pyramidRatio = 0.20; // 20% من النقد لكل دفعة
   const trades: BacktestTrade[] = [];
   const equityCurve: number[] = [initialCapital];
@@ -719,17 +720,35 @@ export function runBacktest(
 
     const displayOS = isConfirmedTrend ? (cp > smaSlow ? 0.8 : 0.2) : 0.5;
 
-    // ===== وقف خسارة ديناميكي =====
+    // تتبع أعلى سعر منذ الشراء
+    if (position === 'long' && cp > peakPrice) peakPrice = cp;
+
+    // ===== وقف خسارة ذكي حسب نوع الصفقة (DeepSeek الحل 2) =====
     if (position === 'long' && avgBuyPrice > 0) {
-      const loss = (avgBuyPrice - cp) / avgBuyPrice;
-      if (loss >= dynamicStopLoss) {
-        const val = holdings * cp;
-        cash += val - val * cost;
-        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
-        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0;
-        lastTradeDay = i;
-        equityCurve.push(cash);
-        continue;
+      if (isConfirmedTrend) {
+        // اتجاه مؤكد: لا وقف خسارة ATR! فقط شبكة أمان 20% من القمة
+        const drawdownFromPeak = peakPrice > 0 ? (peakPrice - cp) / peakPrice : 0;
+        if (drawdownFromPeak >= 0.20) {
+          const val = holdings * cp;
+          cash += val - val * cost;
+          trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+          holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0;
+          lastTradeDay = i;
+          equityCurve.push(cash);
+          continue;
+        }
+      } else {
+        // غير مؤكد: وقف خسارة ATR عادي
+        const loss = (avgBuyPrice - cp) / avgBuyPrice;
+        if (loss >= dynamicStopLoss) {
+          const val = holdings * cp;
+          cash += val - val * cost;
+          trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+          holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0;
+          lastTradeDay = i;
+          equityCurve.push(cash);
+          continue;
+        }
       }
     }
 
@@ -743,10 +762,10 @@ export function runBacktest(
       const trendBuyCondition = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
 
       if (trendBuyCondition && cash > 0 && pyramidCount < maxPyramid) {
-        // Pyramiding تدريجي: 15% لكل دفعة (DeepSeek)
         const invest = cash * 0.15;
         const qty = invest / cp;
         avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
+        peakPrice = Math.max(peakPrice, cp);
         cash -= invest + invest * cost;
         holdings += qty;
         position = 'long';
@@ -754,12 +773,12 @@ export function runBacktest(
         trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
         lastTradeDay = i;
       }
-      // بيع: تقاطع عكسي
+      // بيع فقط عند انعكاس حقيقي (تقاطع SMA عكسي)
       else if (position === 'long' && smaFast < smaSlow) {
         const val = holdings * cp;
         cash += val - val * cost;
         trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
-        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0;
+        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0;
         lastTradeDay = i;
       }
     }
