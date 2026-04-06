@@ -202,6 +202,24 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
 
     if (isWarmup) continue;
 
+    // الطبقات التنبؤية
+    const accel = allPrices.length >= 3 ? allPrices[allPrices.length-1] - 2*allPrices[allPrices.length-2] + allPrices[allPrices.length-3] : 0;
+    let negAccelDays = 0;
+    for (let d = 0; d < 5 && allPrices.length - d >= 3; d++) {
+      const s = allPrices.slice(0, allPrices.length - d);
+      if (s[s.length-1] - 2*s[s.length-2] + s[s.length-3] < 0) negAccelDays++; else break;
+    }
+    const volFC = (() => {
+      if (allPrices.length < 22) return 'normal';
+      const dr: number[] = [];
+      for (let k = allPrices.length - 20; k < allPrices.length; k++) {
+        if (allPrices[k-1] !== 0) dr.push(Math.abs((allPrices[k] - allPrices[k-1]) / allPrices[k-1]));
+      }
+      if (dr.length === 0) return 'normal';
+      const avg = dr.reduce((a,b) => a+b, 0) / dr.length;
+      return dr[dr.length-1] > avg * 1.5 ? 'high' : 'normal';
+    })();
+
     const earlyStopLoss = cp > 0 ? Math.min(0.05, Math.max(0.025, 1.5 * atr / cp)) : 0.035;
 
     // تتبع القمة
@@ -235,7 +253,10 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
         const recent30 = prices.slice(Math.max(0, i - 30), i + 1);
         const priceRange = Math.min(...recent30) > 0 ? (Math.max(...recent30) - Math.min(...recent30)) / Math.min(...recent30) : 0;
         if (priceRange > 0.08 || (atr/cp) >= 0.008) { continue; }
-        const invest = cash * 0.90;
+        let allocPct = 0.90;
+        if (negAccelDays >= 3 && cp > smaSlow) allocPct *= 0.70;
+        if (volFC === 'high') allocPct *= 0.60;
+        const invest = cash * allocPct;
         const qty = invest / cp;
         avgBuyPrice = cp; peakPrice = cp; tpDone = false;
         cash -= invest + invest * cost;
@@ -248,7 +269,10 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
     if (position === 'long' && cash > 100 && pyramidCount < 3 && daysSinceLastTrade >= cooldownDays) {
       const dip = peakPrice > 0 ? (peakPrice - cp) / peakPrice : 0;
       if (dip >= 0.03 && cp > smaSlow) {
-        const invest = cash * 0.50;
+        let dipPct = 0.50;
+        if (negAccelDays >= 3) dipPct *= 0.70;
+        if (volFC === 'high') dipPct *= 0.60;
+        const invest = cash * dipPct;
         const qty = invest / cp;
         avgBuyPrice = ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty);
         cash -= invest + invest * cost;
@@ -281,7 +305,8 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
       const aggressiveEntry = zScore < -2 && cp <= bb.lower;
       const standardEntry = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
       const notInDowntrend = cp > smaSlow;
-      if (position === 'none' && (aggressiveEntry || standardEntry) && notInDowntrend && cash > 0) {
+      const volBlock = volFC === 'high' && isRanging;
+      if (position === 'none' && (aggressiveEntry || standardEntry) && notInDowntrend && cash > 0 && !volBlock) {
         const invest = cash * 0.30; // Gemini: 30%
         const qty = invest / cp;
         avgBuyPrice = cp;

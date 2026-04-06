@@ -642,6 +642,79 @@ export function calculateSMA(prices: number[], period: number): number {
   return mean(prices.slice(-period));
 }
 
+// ============ تسارع السعر (Price Acceleration - المشتقة الثانية) ============
+
+export function calculateAcceleration(prices: number[]): number {
+  if (prices.length < 3) return 0;
+  const v1 = prices[prices.length - 1] - prices[prices.length - 2];
+  const v2 = prices[prices.length - 2] - prices[prices.length - 3];
+  return v1 - v2;
+}
+
+// عدد أيام التسارع السالب المتتالية
+export function consecutiveNegativeAcceleration(prices: number[], maxDays = 5): number {
+  let count = 0;
+  for (let d = 0; d < maxDays && prices.length - d >= 3; d++) {
+    const slice = prices.slice(0, prices.length - d);
+    if (calculateAcceleration(slice) < 0) count++;
+    else break;
+  }
+  return count;
+}
+
+// عدد أيام التسارع الموجب المتتالية
+export function consecutivePositiveAcceleration(prices: number[], maxDays = 5): number {
+  let count = 0;
+  for (let d = 0; d < maxDays && prices.length - d >= 3; d++) {
+    const slice = prices.slice(0, prices.length - d);
+    if (calculateAcceleration(slice) > 0) count++;
+    else break;
+  }
+  return count;
+}
+
+// ============ تنبؤ التقلب (Volatility Clustering) ============
+
+export function volatilityForecast(prices: number[]): 'high' | 'normal' {
+  if (prices.length < 22) return 'normal';
+  const dailyReturns: number[] = [];
+  for (let i = prices.length - 20; i < prices.length; i++) {
+    if (prices[i - 1] !== 0) {
+      dailyReturns.push(Math.abs((prices[i] - prices[i - 1]) / prices[i - 1]));
+    }
+  }
+  if (dailyReturns.length === 0) return 'normal';
+  const avgVol = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+  const currentVol = dailyReturns[dailyReturns.length - 1];
+  return currentVol > avgVol * 1.5 ? 'high' : 'normal';
+}
+
+// ============ عداد الثقة (Confidence Meter) ============
+
+export function calculateConfidenceMeter(
+  adx: number, trend: number, priceAboveSma: boolean,
+  acceleration: number, rsi: number, volForecast: 'high' | 'normal',
+  zScore: number,
+): number {
+  let confidence = 0;
+  // قوة الاتجاه
+  if (adx >= 25) confidence += 0.25;
+  if (adx >= 35) confidence += 0.10;
+  // اتجاه صاعد
+  if (trend > 0 && priceAboveSma) confidence += 0.15;
+  // تسارع موجب في اتجاه صاعد
+  if (acceleration > 0 && trend > 0) confidence += 0.15;
+  // RSI في منطقة صحية (30-70)
+  if (rsi >= 30 && rsi <= 70) confidence += 0.10;
+  // RSI في تشبع بيعي (فرصة)
+  if (rsi < 30) confidence += 0.15;
+  // تقلب منخفض
+  if (volForecast === 'normal') confidence += 0.10;
+  // Z-Score سلبي (فرصة شراء)
+  if (zScore < -1) confidence += 0.10;
+  return Math.min(1, Math.max(0, confidence));
+}
+
 // ============ ATR المبسط (بدون High/Low) ============
 
 export function calculateATR(prices: number[], period = 14): number {
@@ -699,11 +772,20 @@ export function runBacktest(
     const adx = calculateADX(allPrices, 14);
     const atr = calculateATR(allPrices, 14);
 
-    // وقف خسارة ديناميكي أضيق للدخول المبكر
-    const earlyStopLoss = cp > 0 ? Math.min(0.05, Math.max(0.025, 1.5 * atr / cp)) : 0.035;
+    // الطبقات التنبؤية الثلاث (DeepSeek)
+    const accel = calculateAcceleration(allPrices);
+    const negAccelDays = consecutiveNegativeAcceleration(allPrices);
+    const posAccelDays = consecutivePositiveAcceleration(allPrices);
+    const volForecast = volatilityForecast(allPrices);
     const isRanging = adx < 25;
 
-    const displayOS = cp > smaSlow ? 0.7 : 0.3;
+    // وقف خسارة ديناميكي
+    const earlyStopLoss = cp > 0 ? Math.min(0.05, Math.max(0.025, 1.5 * atr / cp)) : 0.035;
+
+    // عداد الثقة
+    const trend = cp > smaSlow ? 1 : -1;
+    const confMeter = calculateConfidenceMeter(adx, trend, cp > smaSlow, accel, rsi, volForecast, zScore);
+    const displayOS = confMeter;
 
     // تتبع القمة
     if (position === 'long' && cp > peakPrice) peakPrice = cp;
@@ -749,9 +831,15 @@ export function runBacktest(
         const rangeLow = Math.min(...recent30);
         const priceRange = rangeLow > 0 ? (rangeHigh - rangeLow) / rangeLow : 0;
 
-        // نطاق واسع (> 12%) = متذبذب → لا تشتري All-In
+        // نطاق واسع = متذبذب → لا تشتري All-In
+        // + تنبؤ التقلب: إذا مرتفع → قلل الحجم 40%
         if (priceRange <= 0.08 && (atr/cp) < 0.008) {
-          const invest = cash * 0.90;
+          let allocPct = 0.90;
+          // التسارع السالب 3+ أيام → قلل 30% (DeepSeek)
+          if (negAccelDays >= 3 && cp > smaSlow) allocPct *= 0.70;
+          // تقلب مرتفع → قلل 40%
+          if (volForecast === 'high') allocPct *= 0.60;
+          const invest = cash * allocPct;
           const qty = invest / cp;
           avgBuyPrice = cp; peakPrice = cp; tpDone = false;
           cash -= invest + invest * cost;
@@ -766,7 +854,11 @@ export function runBacktest(
     if (position === 'long' && cash > 100 && pyramidCount < 3 && daysSinceLastTrade >= cooldownDays) {
       const dipFromPeak = peakPrice > 0 ? (peakPrice - cp) / peakPrice : 0;
       if (dipFromPeak >= 0.03 && cp > smaSlow) {
-        const invest = cash * 0.50;
+        let dipPct = 0.50;
+        // تسارع سالب → قلل الدفعة 30%
+        if (negAccelDays >= 3) dipPct *= 0.70;
+        if (volForecast === 'high') dipPct *= 0.60;
+        const invest = cash * dipPct;
         const qty = invest / cp;
         avgBuyPrice = ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty);
         cash -= invest + invest * cost;
@@ -804,8 +896,11 @@ export function runBacktest(
       const standardEntry = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
       const notInDowntrend = cp > smaSlow;
 
-      if (position === 'none' && (aggressiveEntry || standardEntry) && notInDowntrend && cash > 0) {
-        const invest = cash * 0.30; // Gemini: 30% من المحفظة
+      // تنبؤ التقلب المرتفع + متذبذب → لا تشتري نهائياً (DeepSeek)
+      const volBlock = volForecast === 'high' && isRanging;
+
+      if (position === 'none' && (aggressiveEntry || standardEntry) && notInDowntrend && cash > 0 && !volBlock) {
+        const invest = cash * 0.30;
         const qty = invest / cp;
         avgBuyPrice = cp;
         cash -= invest + invest * cost;
