@@ -642,18 +642,33 @@ export function calculateSMA(prices: number[], period: number): number {
   return mean(prices.slice(-period));
 }
 
-// ============ باك تيست - استراتيجية مزدوجة ============
-// A: Trend Following (ADX ≥ 25) → SMA200/50 crossover
-// B: Mean Reversion (ADX < 20) → Bollinger + RSI
+// ============ ATR المبسط (بدون High/Low) ============
+
+export function calculateATR(prices: number[], period = 14): number {
+  if (prices.length < period + 1) return 0;
+  let trSum = 0;
+  for (let i = prices.length - period; i < prices.length; i++) {
+    trSum += Math.abs(prices[i] - prices[i - 1]);
+  }
+  return trSum / period;
+}
+
+// ============ باك تيست - استراتيجية Claude + DeepSeek المشتركة ============
+// SMA ديناميكي + فترة تمهيد + RSI<30 مع تأكيد + ATR لوقف الخسارة
 
 export function runBacktest(
   prices: number[], initialCapital: number, settings: SystemSettings,
 ): BacktestResult {
   const { transactionCost: cost } = settings;
 
-  if (prices.length < 30) {
+  if (prices.length < 50) {
     return { totalReturn: 0, buyAndHoldReturn: 0, numberOfTrades: 0, winRate: 0, trades: [], equityCurve: [initialCapital] };
   }
+
+  // SMA ديناميكي حسب طول البيانات (اقتراح DeepSeek)
+  const dataLength = prices.length;
+  const slowPeriod = Math.min(200, Math.max(50, Math.floor(dataLength * 0.3)));
+  const fastPeriod = Math.max(10, Math.floor(slowPeriod * 0.4));
 
   let cash = initialCapital, holdings = 0;
   let avgBuyPrice = 0;
@@ -663,34 +678,57 @@ export function runBacktest(
   let lastTradeDay = -20;
   const cooldownDays = 10;
 
-  // نحتاج 30 يوم على الأقل لحساب المؤشرات
-  const startDay = 30;
+  // فترة تمهيد: لا تداول خلالها (اقتراح DeepSeek)
+  const warmupDays = slowPeriod;
 
-  for (let i = startDay; i < prices.length; i++) {
+  for (let i = fastPeriod; i < prices.length; i++) {
     const cp = prices[i];
     const allPrices = prices.slice(0, i + 1);
     const daysSinceLastTrade = i - lastTradeDay;
+    const isWarmup = i < warmupDays;
 
-    // حساب المؤشرات الأساسية
-    const sma50 = calculateSMA(allPrices, Math.min(50, allPrices.length));
-    const sma200 = calculateSMA(allPrices, Math.min(allPrices.length, 200));
-    const adx = calculateADX(allPrices, 14);
+    // المؤشرات
+    const smaFast = calculateSMA(allPrices, fastPeriod);
+    const smaSlow = calculateSMA(allPrices, Math.min(slowPeriod, allPrices.length));
     const rsi = calculateRSI(allPrices, 14);
     const bb = calculateBollingerBands(allPrices, 20, 2);
+    const zScore = calculateZScore(cp, allPrices.slice(-Math.min(50, allPrices.length)));
+    const adx = calculateADX(allPrices, 14);
+    const atr = calculateATR(allPrices, 14);
+
+    // وقف خسارة ديناميكي (ATR) - بين 3% و 8% (اقتراح DeepSeek)
+    const dynamicStopLoss = cp > 0 ? Math.min(0.08, Math.max(0.03, 2 * atr / cp)) : 0.05;
 
     // تحديد نوع السوق
     const isTrending = adx >= 25;
     const isRanging = adx < 20;
-    // بين 20-25: منطقة انتظار
 
-    // OS للعرض فقط (ليس لاتخاذ القرار)
-    const displayOS = isTrending ? (cp > sma200 ? 0.8 : 0.2) : 0.5;
+    const displayOS = isTrending ? (cp > smaSlow ? 0.8 : 0.2) : 0.5;
+
+    // ===== وقف خسارة ديناميكي (في كل الأحوال) =====
+    if (position === 'long' && avgBuyPrice > 0) {
+      const loss = (avgBuyPrice - cp) / avgBuyPrice;
+      if (loss >= dynamicStopLoss) {
+        const val = holdings * cp;
+        cash += val - val * cost;
+        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+        holdings = 0; avgBuyPrice = 0; position = 'none';
+        lastTradeDay = i;
+        equityCurve.push(cash);
+        continue;
+      }
+    }
+
+    // لا تداول خلال فترة التمهيد
+    if (isWarmup) {
+      equityCurve.push(cash + holdings * cp);
+      continue;
+    }
 
     // ===== الاستراتيجية A: اتباع الاتجاه (ADX ≥ 25) =====
     if (isTrending && daysSinceLastTrade >= cooldownDays) {
-
-      if (position === 'none' && cp > sma200 && cash > 0) {
-        // شراء: السعر فوق SMA200 + اتجاه قوي
+      // تقاطع SMA: السريع فوق البطيء = شراء
+      if (position === 'none' && smaFast > smaSlow && cp > smaSlow && cash > 0) {
         const invest = cash * settings.backtestBuyRatio;
         const qty = invest / cp;
         avgBuyPrice = cp;
@@ -700,8 +738,8 @@ export function runBacktest(
         trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
         lastTradeDay = i;
       }
-      else if (position === 'long' && cp < sma50) {
-        // بيع: السعر تحت SMA50 (انعكاس)
+      // تقاطع عكسي: السريع تحت البطيء = بيع
+      else if (position === 'long' && smaFast < smaSlow) {
         const val = holdings * cp;
         cash += val - val * cost;
         trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
@@ -712,9 +750,8 @@ export function runBacktest(
 
     // ===== الاستراتيجية B: الارتداد (ADX < 20) =====
     if (isRanging && daysSinceLastTrade >= cooldownDays) {
-
-      if (position === 'none' && cp <= bb.lower && rsi < 25 && cash > 0) {
-        // شراء: السعر تحت Bollinger السفلي + RSI < 25
+      // شراء: RSI < 30 + (Z < -1.5 أو Bollinger السفلي) (اقتراح DeepSeek المعدل)
+      if (position === 'none' && rsi < 30 && (zScore < -1.5 || cp <= bb.lower) && cash > 0) {
         const invest = cash * settings.backtestBuyRatio;
         const qty = invest / cp;
         avgBuyPrice = cp;
@@ -724,10 +761,9 @@ export function runBacktest(
         trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
         lastTradeDay = i;
       }
+      // بيع: Bollinger العلوي أو ربح 10%
       else if (position === 'long') {
         const gain = avgBuyPrice > 0 ? (cp - avgBuyPrice) / avgBuyPrice : 0;
-
-        // بيع: وصل Bollinger العلوي أو ربح 10%
         if (cp >= bb.upper || gain >= 0.10) {
           const val = holdings * cp;
           cash += val - val * cost;
@@ -735,18 +771,6 @@ export function runBacktest(
           holdings = 0; avgBuyPrice = 0; position = 'none';
           lastTradeDay = i;
         }
-      }
-    }
-
-    // ===== وقف خسارة 10% (في كل الأحوال) =====
-    if (position === 'long' && avgBuyPrice > 0) {
-      const loss = (avgBuyPrice - cp) / avgBuyPrice;
-      if (loss >= 0.10) {
-        const val = holdings * cp;
-        cash += val - val * cost;
-        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
-        holdings = 0; avgBuyPrice = 0; position = 'none';
-        lastTradeDay = i;
       }
     }
 
