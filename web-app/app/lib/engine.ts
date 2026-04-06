@@ -642,111 +642,188 @@ export function calculateSMA(prices: number[], period: number): number {
   return mean(prices.slice(-period));
 }
 
-// ============ باك تيست - استراتيجية مزدوجة ============
-// A: Trend Following (ADX ≥ 25) → SMA200/50 crossover
-// B: Mean Reversion (ADX < 20) → Bollinger + RSI
+// ============ ATR المبسط (بدون High/Low) ============
+
+export function calculateATR(prices: number[], period = 14): number {
+  if (prices.length < period + 1) return 0;
+  let trSum = 0;
+  for (let i = prices.length - period; i < prices.length; i++) {
+    trSum += Math.abs(prices[i] - prices[i - 1]);
+  }
+  return trSum / period;
+}
+
+// ============ باك تيست - استراتيجية Claude + DeepSeek النهائية ============
+// 1. Pyramiding في الصاعد (20% + 20% + 20% = حد أقصى 60%)
+// 2. فلتر SMA100 + ADX للاتجاه (يمنع الشراء عند القمم)
+// 3. تأكيد ثلاثي للارتداد (Z < -1.5 و RSI < 30 و Bollinger السفلي)
 
 export function runBacktest(
   prices: number[], initialCapital: number, settings: SystemSettings,
 ): BacktestResult {
   const { transactionCost: cost } = settings;
 
-  if (prices.length < 30) {
+  if (prices.length < 50) {
     return { totalReturn: 0, buyAndHoldReturn: 0, numberOfTrades: 0, winRate: 0, trades: [], equityCurve: [initialCapital] };
   }
+
+  const dataLength = prices.length;
+  const slowPeriod = Math.min(200, Math.max(50, Math.floor(dataLength * 0.3)));
+  const fastPeriod = Math.max(10, Math.floor(slowPeriod * 0.4));
+  const sma100Period = Math.min(100, Math.max(30, Math.floor(dataLength * 0.5)));
 
   let cash = initialCapital, holdings = 0;
   let avgBuyPrice = 0;
   let position: 'none' | 'long' = 'none';
+  let pyramidCount = 0;
+  let peakPrice = 0;
+  let tpDone = false; // جني أرباح تم؟
   const trades: BacktestTrade[] = [];
   const equityCurve: number[] = [initialCapital];
-  let lastTradeDay = -20;
-  const cooldownDays = 10;
+  let lastTradeDay = -10;
+  const cooldownDays = 7;
+  // warmup أقل: 15% من البيانات (بدل slowPeriod)
+  const warmupDays = Math.max(20, Math.floor(dataLength * 0.12));
 
-  // نحتاج 30 يوم على الأقل لحساب المؤشرات
-  const startDay = 30;
-
-  for (let i = startDay; i < prices.length; i++) {
+  for (let i = fastPeriod; i < prices.length; i++) {
     const cp = prices[i];
     const allPrices = prices.slice(0, i + 1);
     const daysSinceLastTrade = i - lastTradeDay;
+    const isWarmup = i < warmupDays;
 
-    // حساب المؤشرات الأساسية
-    const sma50 = calculateSMA(allPrices, Math.min(50, allPrices.length));
-    const sma200 = calculateSMA(allPrices, Math.min(allPrices.length, 200));
-    const adx = calculateADX(allPrices, 14);
+    const smaFast = calculateSMA(allPrices, fastPeriod);
+    const smaSlow = calculateSMA(allPrices, Math.min(slowPeriod, allPrices.length));
     const rsi = calculateRSI(allPrices, 14);
     const bb = calculateBollingerBands(allPrices, 20, 2);
+    const zScore = calculateZScore(cp, allPrices.slice(-Math.min(50, allPrices.length)));
+    const adx = calculateADX(allPrices, 14);
+    const atr = calculateATR(allPrices, 14);
 
-    // تحديد نوع السوق
-    const isTrending = adx >= 25;
-    const isRanging = adx < 20;
-    // بين 20-25: منطقة انتظار
+    // وقف خسارة ديناميكي أضيق للدخول المبكر
+    const earlyStopLoss = cp > 0 ? Math.min(0.05, Math.max(0.025, 1.5 * atr / cp)) : 0.035;
+    const isRanging = adx < 25;
 
-    // OS للعرض فقط (ليس لاتخاذ القرار)
-    const displayOS = isTrending ? (cp > sma200 ? 0.8 : 0.2) : 0.5;
+    const displayOS = cp > smaSlow ? 0.7 : 0.3;
 
-    // ===== الاستراتيجية A: اتباع الاتجاه (ADX ≥ 25) =====
-    if (isTrending && daysSinceLastTrade >= cooldownDays) {
+    // تتبع القمة
+    if (position === 'long' && cp > peakPrice) peakPrice = cp;
 
-      if (position === 'none' && cp > sma200 && cash > 0) {
-        // شراء: السعر فوق SMA200 + اتجاه قوي
-        const invest = cash * settings.backtestBuyRatio;
-        const qty = invest / cp;
-        avgBuyPrice = cp;
-        cash -= invest + invest * cost;
-        holdings += qty;
-        position = 'long';
-        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
-        lastTradeDay = i;
-      }
-      else if (position === 'long' && cp < sma50) {
-        // بيع: السعر تحت SMA50 (انعكاس)
+    // ===== وقف خسارة: خروج سريع =====
+    if (position === 'long' && avgBuyPrice > 0) {
+      const loss = (avgBuyPrice - cp) / avgBuyPrice;
+      const dropFromPeak = peakPrice > 0 ? (peakPrice - cp) / peakPrice : 0;
+
+      // وقف خسارة من سعر الشراء (للصفقات الجديدة)
+      if (loss >= earlyStopLoss && daysSinceLastTrade <= 20) {
         const val = holdings * cp;
         cash += val - val * cost;
         trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
-        holdings = 0; avgBuyPrice = 0; position = 'none';
+        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0; tpDone = false;
         lastTradeDay = i;
+        equityCurve.push(cash);
+        continue;
+      }
+      // شبكة أمان 15% من القمة (للصفقات الرابحة)
+      if (dropFromPeak >= 0.15 && peakPrice > avgBuyPrice) {
+        const val = holdings * cp;
+        cash += val - val * cost;
+        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+        holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0; tpDone = false;
+        lastTradeDay = i;
+        equityCurve.push(cash);
+        continue;
       }
     }
 
-    // ===== الاستراتيجية B: الارتداد (ADX < 20) =====
-    if (isRanging && daysSinceLastTrade >= cooldownDays) {
+    if (isWarmup) {
+      equityCurve.push(cash + holdings * cp);
+      continue;
+    }
 
-      if (position === 'none' && cp <= bb.lower && rsi < 25 && cash > 0) {
-        // شراء: السعر تحت Bollinger السفلي + RSI < 25
-        const invest = cash * settings.backtestBuyRatio;
-        const qty = invest / cp;
-        avgBuyPrice = cp;
-        cash -= invest + invest * cost;
-        holdings += qty;
-        position = 'long';
-        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
-        lastTradeDay = i;
-      }
-      else if (position === 'long') {
-        const gain = avgBuyPrice > 0 ? (cp - avgBuyPrice) / avgBuyPrice : 0;
+    // ===== الدخول: All-In لكن فقط في السوق غير المتذبذب =====
+    if (position === 'none' && cash > 0 && daysSinceLastTrade >= cooldownDays) {
+      if (cp > smaSlow && cp > smaFast) {
+        // كشف التذبذب: نطاق الأسعار في آخر 30 يوم
+        const recent30 = prices.slice(Math.max(0, i - 30), i + 1);
+        const rangeHigh = Math.max(...recent30);
+        const rangeLow = Math.min(...recent30);
+        const priceRange = rangeLow > 0 ? (rangeHigh - rangeLow) / rangeLow : 0;
 
-        // بيع: وصل Bollinger العلوي أو ربح 10%
-        if (cp >= bb.upper || gain >= 0.10) {
-          const val = holdings * cp;
-          cash += val - val * cost;
-          trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
-          holdings = 0; avgBuyPrice = 0; position = 'none';
+        // نطاق واسع (> 12%) = متذبذب → لا تشتري All-In
+        if (priceRange <= 0.08 && (atr/cp) < 0.008) {
+          const invest = cash * 0.90;
+          const qty = invest / cp;
+          avgBuyPrice = cp; peakPrice = cp; tpDone = false;
+          cash -= invest + invest * cost;
+          holdings += qty; position = 'long'; pyramidCount = 1;
+          trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
           lastTradeDay = i;
         }
       }
     }
 
-    // ===== وقف خسارة 10% (في كل الأحوال) =====
-    if (position === 'long' && avgBuyPrice > 0) {
-      const loss = (avgBuyPrice - cp) / avgBuyPrice;
-      if (loss >= 0.10) {
-        const val = holdings * cp;
-        cash += val - val * cost;
-        trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
-        holdings = 0; avgBuyPrice = 0; position = 'none';
+    // === تعزيز بالنقد المتبقي عند التصحيحات ===
+    if (position === 'long' && cash > 100 && pyramidCount < 3 && daysSinceLastTrade >= cooldownDays) {
+      const dipFromPeak = peakPrice > 0 ? (peakPrice - cp) / peakPrice : 0;
+      if (dipFromPeak >= 0.03 && cp > smaSlow) {
+        const invest = cash * 0.50;
+        const qty = invest / cp;
+        avgBuyPrice = ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty);
+        cash -= invest + invest * cost;
+        holdings += qty; pyramidCount++;
+        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
         lastTradeDay = i;
+      }
+    }
+
+    // === جني أرباح جزئي عند 20% ===
+    if (position === 'long' && !tpDone && avgBuyPrice > 0 && holdings > 0) {
+      if ((cp - avgBuyPrice) / avgBuyPrice >= 0.20) {
+        const qty = holdings * 0.20;
+        const val = qty * cp;
+        cash += val - val * cost; holdings -= qty;
+        tpDone = true;
+        trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex: i, os: displayOS });
+        lastTradeDay = i;
+      }
+    }
+
+    // === خروج كامل عند انعكاس الاتجاه ===
+    if (position === 'long' && smaFast < smaSlow && daysSinceLastTrade >= 5) {
+      const val = holdings * cp;
+      cash += val - val * cost;
+      trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+      holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0; peakPrice = 0; tpDone = false;
+      lastTradeDay = i;
+    }
+
+    // ===== الاستراتيجية B: القناص في التذبذب (Gemini Active Ranging) =====
+    if (isRanging && daysSinceLastTrade >= cooldownDays) {
+      // شراء هجومي: Z-Score < -2 أو (Z < -1.5 + RSI < 30 + Bollinger السفلي)
+      const aggressiveEntry = zScore < -2 && cp <= bb.lower;
+      const standardEntry = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
+      const notInDowntrend = cp > smaSlow;
+
+      if (position === 'none' && (aggressiveEntry || standardEntry) && notInDowntrend && cash > 0) {
+        const invest = cash * 0.30; // Gemini: 30% من المحفظة
+        const qty = invest / cp;
+        avgBuyPrice = cp;
+        cash -= invest + invest * cost;
+        holdings += qty;
+        position = 'long'; pyramidCount = 1;
+        trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
+        lastTradeDay = i;
+      }
+      // بيع سريع: Bollinger العلوي أو ربح 5% (Gemini: خروج سريع)
+      else if (position === 'long') {
+        const gain = avgBuyPrice > 0 ? (cp - avgBuyPrice) / avgBuyPrice : 0;
+        if (cp >= bb.upper || gain >= 0.05) {
+          const val = holdings * cp;
+          cash += val - val * cost;
+          trades.push({ type: 'sell', price: cp, quantity: holdings, value: val, dayIndex: i, os: displayOS });
+          holdings = 0; avgBuyPrice = 0; position = 'none'; pyramidCount = 0;
+          lastTradeDay = i;
+        }
       }
     }
 
