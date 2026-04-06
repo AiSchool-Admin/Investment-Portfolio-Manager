@@ -757,12 +757,19 @@ export function runBacktest(
       continue;
     }
 
-    // ===== الاستراتيجية A: اتباع الاتجاه (اتجاه مؤكد فقط) =====
+    // ===== الاستراتيجية A: اتباع الاتجاه مع Pyramiding تدريجي =====
     if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuyCondition = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
 
-      if (trendBuyCondition && cash > 0 && pyramidCount < maxPyramid) {
-        const invest = cash * 0.15;
+      // Pyramiding تدريجي (DeepSeek): 15% × 3 + 15% + 10% = حد أقصى 70%
+      const maxPyramidExtended = 5;
+      const pyramidPct = pyramidCount < 3 ? 0.15 : (pyramidCount === 3 ? 0.15 : 0.10);
+      const canBuy = pyramidCount < maxPyramidExtended;
+      // الدفعات 4+5 تحتاج تأكيد أقوى (40+ يوم)
+      const extraConfirm = pyramidCount >= 3 ? consecutiveTrendDays >= 40 : true;
+
+      if (trendBuyCondition && cash > 0 && canBuy && extraConfirm) {
+        const invest = cash * pyramidPct;
         const qty = invest / cp;
         avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
         peakPrice = Math.max(peakPrice, cp);
@@ -773,7 +780,16 @@ export function runBacktest(
         trades.push({ type: 'buy', price: cp, quantity: qty, value: invest, dayIndex: i, os: displayOS });
         lastTradeDay = i;
       }
-      // بيع فقط عند انعكاس حقيقي (تقاطع SMA عكسي)
+      // جني أرباح جزئي عند 30% ربح (DeepSeek)
+      else if (position === 'long' && avgBuyPrice > 0 && ((cp - avgBuyPrice) / avgBuyPrice) >= 0.30 && holdings > 0) {
+        const qty = holdings * 0.30; // بيع 30% من المركز
+        const val = qty * cp;
+        cash += val - val * cost;
+        holdings -= qty;
+        trades.push({ type: 'sell', price: cp, quantity: qty, value: val, dayIndex: i, os: displayOS });
+        lastTradeDay = i;
+      }
+      // بيع كامل فقط عند انعكاس حقيقي (تقاطع SMA عكسي)
       else if (position === 'long' && smaFast < smaSlow) {
         const val = holdings * cp;
         cash += val - val * cost;
@@ -783,12 +799,13 @@ export function runBacktest(
       }
     }
 
-    // ===== الاستراتيجية B: الارتداد مع تأكيد ثلاثي =====
+    // ===== الاستراتيجية B: الارتداد + شرط السعر فوق SMA_slow =====
     if (isRanging && daysSinceLastTrade >= cooldownDays) {
-      // شراء: تأكيد ثلاثي (DeepSeek) - الثلاثة معاً
+      // تأكيد ثلاثي + السعر فوق SMA_slow (يمنع الشراء في الهابط)
       const tripleConfirm = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
+      const notInDowntrend = cp > smaSlow; // DeepSeek: لا تشتري في هبوط عام
 
-      if (position === 'none' && tripleConfirm && cash > 0) {
+      if (position === 'none' && tripleConfirm && notInDowntrend && cash > 0) {
         const invest = cash * pyramidRatio;
         const qty = invest / cp;
         avgBuyPrice = cp;

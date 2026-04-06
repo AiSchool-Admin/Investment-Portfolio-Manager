@@ -200,18 +200,29 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
 
     if (isWarmup) continue;
 
-    // Trend Following (اتجاه مؤكد فقط)
+    // Trend Following + Pyramiding تدريجي
     if (isConfirmedTrend && daysSinceLastTrade >= cooldownDays) {
       const trendBuy = smaFast > smaSlow && cp > sma100 && cp > smaSlow;
-      if (trendBuy && cash > 0 && pyramidCount < maxPyramid) {
+      const maxPE = 5;
+      const pPct = pyramidCount < 3 ? 0.15 : (pyramidCount === 3 ? 0.15 : 0.10);
+      const extraOK = pyramidCount >= 3 ? consecutiveTrendDays >= 40 : true;
+
+      if (trendBuy && cash > 0 && pyramidCount < maxPE && extraOK) {
         peakPrice = Math.max(peakPrice, cp);
-        const invest = cash * 0.15;
+        const invest = cash * pPct;
         const qty = invest / cp;
         avgBuyPrice = holdings > 0 ? ((avgBuyPrice * holdings) + (cp * qty)) / (holdings + qty) : cp;
         cash -= invest + invest * cost;
         holdings += qty;
         position = 'long'; pyramidCount++;
         trades.push({ type: 'buy(TF)', price: cp, dayIndex: i, quantity: qty, value: invest });
+        lastTradeDay = i;
+      } else if (position === 'long' && avgBuyPrice > 0 && ((cp - avgBuyPrice) / avgBuyPrice) >= 0.30 && holdings > 0) {
+        // جني أرباح 30%
+        const qty = holdings * 0.30;
+        const val = qty * cp;
+        cash += val - val * cost; holdings -= qty;
+        trades.push({ type: 'sell(TP)', price: cp, dayIndex: i, quantity: qty, value: val });
         lastTradeDay = i;
       } else if (position === 'long' && smaFast < smaSlow) {
         const val = holdings * cp;
@@ -222,10 +233,11 @@ function runBacktest(prices: number[], initialCapital: number): BacktestResult {
       }
     }
 
-    // Mean Reversion + Triple Confirmation
+    // Mean Reversion + Triple Confirmation + NOT in downtrend
     if (isRanging && daysSinceLastTrade >= cooldownDays) {
       const tripleConfirm = zScore < -1.5 && rsi < 30 && cp <= bb.lower;
-      if (position === 'none' && tripleConfirm && cash > 0) {
+      const notInDowntrend = cp > smaSlow;
+      if (position === 'none' && tripleConfirm && notInDowntrend && cash > 0) {
         const invest = cash * pyramidRatio;
         const qty = invest / cp;
         avgBuyPrice = cp;
