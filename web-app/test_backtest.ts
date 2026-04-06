@@ -398,3 +398,60 @@ for (const s of longScenarios) {
 
 console.log(`\n${'='.repeat(70)}`);
 console.log('انتهى الاختبار');
+
+// ============ اختبار ملفات CSV الـ 7 ============
+import * as fs from 'fs';
+import * as nodePath from 'path';
+
+const csvDir = nodePath.join(__dirname, 'test-data');
+if (fs.existsSync(csvDir)) {
+  console.log(`\n${'='.repeat(70)}`);
+  console.log('📁 اختبار ملفات CSV الـ 7 (300-350 يوم)');
+  console.log('='.repeat(70));
+
+  const csvFiles = fs.readdirSync(csvDir).filter(f => f.endsWith('.csv')).sort();
+  const results: { name: string; strategy: number; buyHold: number; diff: number; trades: number; win: number }[] = [];
+
+  for (const file of csvFiles) {
+    const content = fs.readFileSync(nodePath.join(csvDir, file), 'utf-8');
+    const lines = content.trim().split('\n');
+    const csvPrices: number[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const val = parseFloat(lines[i].split(',')[1]);
+      if (!isNaN(val)) csvPrices.push(val);
+    }
+
+    const result = runBacktest(csvPrices, 10000);
+    const diff = result.totalReturn - result.buyAndHoldReturn;
+    results.push({
+      name: file.replace('.csv', ''),
+      strategy: result.totalReturn,
+      buyHold: result.buyAndHoldReturn,
+      diff,
+      trades: result.numberOfTrades,
+      win: result.winRate,
+    });
+
+    console.log(`\n  📊 ${file} (${csvPrices.length} يوم)`);
+    console.log(`     $${csvPrices[0]} → $${csvPrices[csvPrices.length-1]}`);
+    console.log(`     استراتيجية: ${result.totalReturn >= 0 ? '+' : ''}${result.totalReturn.toFixed(2)}%`);
+    console.log(`     احتفاظ: ${result.buyAndHoldReturn >= 0 ? '+' : ''}${result.buyAndHoldReturn.toFixed(2)}%`);
+    console.log(`     الفرق: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}% ${diff >= 0 ? '✓' : '✗'}`);
+    console.log(`     صفقات: ${result.numberOfTrades} | فوز: ${result.winRate.toFixed(0)}%`);
+  }
+
+  // ملخص
+  console.log(`\n${'─'.repeat(70)}`);
+  console.log('📋 ملخص النتائج (7 ملفات):');
+  console.log('─'.repeat(70));
+  console.log('الملف'.padEnd(25) + 'استراتيجية'.padEnd(15) + 'احتفاظ'.padEnd(12) + 'الفرق'.padEnd(12) + 'صفقات');
+  for (const r of results) {
+    const s = `${r.strategy >= 0 ? '+' : ''}${r.strategy.toFixed(1)}%`;
+    const b = `${r.buyHold >= 0 ? '+' : ''}${r.buyHold.toFixed(1)}%`;
+    const d = `${r.diff >= 0 ? '+' : ''}${r.diff.toFixed(1)}%`;
+    console.log(`${r.name.padEnd(25)}${s.padEnd(15)}${b.padEnd(12)}${d.padEnd(12)}${r.trades}`);
+  }
+
+  const winsCount = results.filter(r => r.diff >= 0).length;
+  console.log(`\nتفوقت على الاحتفاظ في ${winsCount}/${results.length} سيناريوهات`);
+}
