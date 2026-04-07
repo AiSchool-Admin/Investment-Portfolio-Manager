@@ -66,7 +66,7 @@ function fairEgx30(m: MacroVariables): number {
 function validateMacro(m: MacroVariables): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   for (const [k, lim] of Object.entries(ECONOMY_LIMITS)) {
-    const v = (m as Record<string, number>)[k];
+    const v = (m as unknown as Record<string, number>)[k];
     if (v < lim.min || v > lim.max) errors.push(`${k}: ${v} out of range (${lim.min}-${lim.max})`);
   }
   return { valid: errors.length === 0, errors };
