@@ -833,7 +833,7 @@ export function runBacktest(
 
         // نطاق واسع = متذبذب → لا تشتري All-In
         // + تنبؤ التقلب: إذا مرتفع → قلل الحجم 40%
-        if (priceRange <= 0.08 && (atr/cp) < 0.008) {
+        if (priceRange <= 0.06 && (atr/cp) < 0.006) {
           let allocPct = 0.90;
           // التسارع السالب 3+ أيام → قلل 30% (DeepSeek)
           if (negAccelDays >= 3 && cp > smaSlow) allocPct *= 0.70;
